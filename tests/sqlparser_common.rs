@@ -18903,6 +18903,23 @@ fn parse_compound_chain_no_exponential_blowup() {
 /// guard, not a perf threshold.
 #[test]
 fn parse_compound_keyword_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let body: String = std::iter::repeat_n(".not-b", 25).collect();
+    let sql = format!("SELECT x{body}");
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = Parser::parse_sql(&GenericDialect {}, &sql);
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("parser should handle this quickly, not loop exponentially");
+}
+
 /// Regression test for the 2^N parse-time blowup in `parse_prefix` on inputs
 /// like `IF(current_time(current_time(...x`. Each nested `current_time(` used
 /// to be explored twice at every level (once via the speculative reserved-word
@@ -18914,12 +18931,6 @@ fn parse_prefix_keyword_call_chain_no_exponential_blowup() {
     use std::thread;
     use std::time::Duration;
 
-    let body: String = std::iter::repeat_n(".not-b", 25).collect();
-    let sql = format!("SELECT x{body}");
-
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = Parser::parse_sql(&GenericDialect {}, &sql);
     let sql = String::from("if(") + &"current_time(".repeat(30) + "x";
 
     let (tx, rx) = mpsc::channel();
@@ -18929,7 +18940,6 @@ fn parse_prefix_keyword_call_chain_no_exponential_blowup() {
     });
 
     rx.recv_timeout(Duration::from_secs(5))
-        .expect("parser should handle this quickly, not loop exponentially");
         .expect("parser should reject this quickly, not loop exponentially");
 }
 

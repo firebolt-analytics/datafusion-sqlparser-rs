@@ -189,6 +189,16 @@ fn parse_compound_keyword_chain(c: &mut Criterion) {
     for &n in &[5usize, 10, 15] {
         let body = std::iter::repeat_n(".not-b", n).collect::<String>();
         let sql = format!("SELECT x{body}");
+
+        group.bench_function(format!("chain_{n}"), |b| {
+            b.iter(|| {
+                let _ = Parser::parse_sql(&dialect, std::hint::black_box(&sql));
+            });
+        });
+    }
+    group.finish();
+}
+
 /// Benchmark parsing pathological `IF(<keyword-fn>(<keyword-fn>(...x` chains
 /// that previously caused 2^N work in `parse_prefix`. Each nested
 /// `current_time(` segment used to be explored twice at every level (once via
