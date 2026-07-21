@@ -154,6 +154,13 @@ impl Dialect for BigQueryDialect {
         true
     }
 
+    /// GoogleSQL allows a query to start with FROM (the canonical entry form
+    /// for pipe syntax, e.g. `FROM t |> WHERE …`), so enable FROM-first
+    /// SELECT parsing.
+    fn supports_from_first_select(&self) -> bool {
+        true
+    }
+
     fn supports_create_table_multi_schema_info_sources(&self) -> bool {
         true
     }
