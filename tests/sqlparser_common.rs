@@ -1719,7 +1719,7 @@ fn parse_json_ops_without_colon() {
     ];
 
     for (str_op, op, dialects) in binary_ops {
-        let select = dialects.verified_only_select(&format!("SELECT a {} b", &str_op));
+        let select = dialects.verified_only_select(&format!("SELECT a {} b", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new("a"))),
@@ -2415,7 +2415,7 @@ fn parse_bitwise_ops() {
     ];
 
     for (str_op, op, dialects) in bitwise_ops {
-        let select = dialects.verified_only_select(&format!("SELECT a {} b", &str_op));
+        let select = dialects.verified_only_select(&format!("SELECT a {} b", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new("a"))),
@@ -9572,6 +9572,9 @@ fn test_create_index_with_using_function() {
             predicate: None,
             index_options,
             alter_options,
+            vector: _,
+            or_replace: _,
+            options: _,
         }) => {
             assert_eq!("idx_name", name.to_string());
             assert_eq!("test", table_name.to_string());
@@ -9627,6 +9630,9 @@ fn test_create_index_with_with_clause() {
             predicate: None,
             index_options,
             alter_options,
+            vector: _,
+            or_replace: _,
+            options: _,
         }) => {
             pretty_assertions::assert_eq!("title_idx", name.to_string());
             pretty_assertions::assert_eq!("films", table_name.to_string());
@@ -18552,7 +18558,7 @@ fn parse_generic_unary_ops() {
         ("+", UnaryOperator::Plus),
     ];
     for (str_op, op) in unary_ops {
-        let select = verified_only_select(&format!("SELECT {}expr", &str_op));
+        let select = verified_only_select(&format!("SELECT {}expr", str_op));
         assert_eq!(
             UnnamedExpr(UnaryOp {
                 op: *op,

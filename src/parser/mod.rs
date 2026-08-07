@@ -4839,7 +4839,7 @@ impl<'a> Parser<'a> {
         if self.parse_keyword(expected) {
             Ok(self.get_current_token().clone())
         } else {
-            self.expected_ref(format!("{:?}", &expected).as_str(), self.peek_token_ref())
+            self.expected_ref(format!("{:?}", expected).as_str(), self.peek_token_ref())
         }
     }
 
@@ -4852,7 +4852,7 @@ impl<'a> Parser<'a> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected_ref(format!("{:?}", &expected).as_str(), self.peek_token_ref())
+            self.expected_ref(format!("{:?}", expected).as_str(), self.peek_token_ref())
         }
     }
 
@@ -5267,6 +5267,13 @@ impl<'a> Parser<'a> {
             self.parse_create_secret(or_replace, temporary, persistent)
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user(or_replace).map(Into::into)
+        } else if matches!(
+            &self.peek_token_ref().token,
+            Token::Word(w) if w.keyword == Keyword::NoKeyword && w.value.eq_ignore_ascii_case("VECTOR")
+        ) {
+            // BigQuery `CREATE [OR REPLACE] VECTOR INDEX ...`; VECTOR is not a keyword.
+            self.next_token();
+            self.parse_create_vector_index(or_replace).map(Into::into)
         } else if or_replace {
             self.expected_ref(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW or FUNCTION after CREATE OR REPLACE",
@@ -8120,6 +8127,35 @@ impl<'a> Parser<'a> {
         Ok(Statement::Discard { object_type })
     }
 
+    /// Parse a BigQuery `CREATE [OR REPLACE] VECTOR INDEX` statement (`VECTOR` already consumed).
+    fn parse_create_vector_index(&mut self, or_replace: bool) -> Result<CreateIndex, ParserError> {
+        self.expect_keyword_is(Keyword::INDEX)?;
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
+        let name = self.parse_object_name(false)?;
+        self.expect_keyword_is(Keyword::ON)?;
+        let table_name = self.parse_object_name(false)?;
+        let columns = self.parse_parenthesized_index_column_list()?;
+        let options = self.parse_options(Keyword::OPTIONS)?;
+        Ok(CreateIndex {
+            name: Some(name),
+            table_name,
+            using: None,
+            columns,
+            vector: true,
+            or_replace,
+            unique: false,
+            concurrently: false,
+            if_not_exists,
+            include: vec![],
+            nulls_distinct: None,
+            with: vec![],
+            options,
+            predicate: None,
+            index_options: vec![],
+            alter_options: vec![],
+        })
+    }
+
     /// Parse a `CREATE INDEX` statement.
     pub fn parse_create_index(&mut self, unique: bool) -> Result<CreateIndex, ParserError> {
         let concurrently = self.parse_keyword(Keyword::CONCURRENTLY);
@@ -8200,12 +8236,15 @@ impl<'a> Parser<'a> {
             table_name,
             using,
             columns,
+            vector: false,
+            or_replace: false,
             unique,
             concurrently,
             if_not_exists,
             include,
             nulls_distinct,
             with,
+            options: vec![],
             predicate,
             index_options,
             alter_options,
@@ -13428,7 +13467,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::EOF => break,
                 token => {
-                    return Err(ParserError::ParserError(format!(
+                    Err(ParserError::ParserError(format!(
                         "Unexpected token in identifier: {token}"
                     )))?;
                 }
@@ -16706,7 +16745,7 @@ impl<'a> Parser<'a> {
                 where_clause = Some(self.parse_expr()?);
             } else {
                 let tok = self.peek_token_ref();
-                return parser_err!(
+                parser_err!(
                     format!(
                         "Expected one of DIMENSIONS, METRICS, FACTS or WHERE, got {}",
                         tok.token
