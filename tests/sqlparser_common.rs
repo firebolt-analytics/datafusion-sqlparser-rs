@@ -14434,6 +14434,8 @@ fn tests_select_values_without_parens_and_set_op() {
         SetExpr::SetOperation {
             op,
             set_quantifier: _,
+            mode: _,
+            column_match: _,
             left,
             right,
         } => {
