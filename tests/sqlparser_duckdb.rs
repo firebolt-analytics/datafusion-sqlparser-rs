@@ -261,13 +261,19 @@ fn test_select_union_by_name() {
     let q3 = "SELECT * FROM capitals UNION DISTINCT BY NAME SELECT * FROM weather";
 
     for (ast, expected_quantifier) in &[
-        (duckdb().verified_query(q1), SetQuantifier::ByName),
-        (duckdb().verified_query(q2), SetQuantifier::AllByName),
-        (duckdb().verified_query(q3), SetQuantifier::DistinctByName),
+        (duckdb().verified_query(q1), SetQuantifier::None),
+        (duckdb().verified_query(q2), SetQuantifier::All),
+        (duckdb().verified_query(q3), SetQuantifier::Distinct),
     ] {
         let expected = Box::<SetExpr>::new(SetExpr::SetOperation {
             op: SetOperator::Union,
             set_quantifier: *expected_quantifier,
+            mode: None,
+            column_match: Some(SetOperationColumnMatch {
+                kind: SetOperationColumnMatchKind::ByName,
+                strict: false,
+                columns: None,
+            }),
             left: Box::<SetExpr>::new(SetExpr::Select(Box::new(Select {
                 select_token: AttachedToken::empty(),
                 optimizer_hints: vec![],

@@ -257,6 +257,105 @@ fn parse_big_query_non_reserved_column_alias() {
 }
 
 #[test]
+fn parse_set_operation_by_name() {
+    fn set_op(
+        stmt: Statement,
+    ) -> (
+        SetOperator,
+        SetQuantifier,
+        Option<SetOperationMode>,
+        Option<SetOperationColumnMatch>,
+    ) {
+        let Statement::Query(query) = stmt else {
+            panic!("expected a query");
+        };
+        match *query.body {
+            SetExpr::SetOperation {
+                op,
+                set_quantifier,
+                mode,
+                column_match,
+                ..
+            } => (op, set_quantifier, mode, column_match),
+            other => panic!("expected a set operation, got {other:?}"),
+        }
+    }
+
+    // Bare `BY NAME`.
+    let (op, q, mode, cm) =
+        set_op(bigquery().verified_stmt("SELECT 1 AS a UNION ALL BY NAME SELECT 1 AS a"));
+    assert_eq!(op, SetOperator::Union);
+    assert_eq!(q, SetQuantifier::All);
+    assert_eq!(mode, None);
+    assert_eq!(
+        cm,
+        Some(SetOperationColumnMatch {
+            kind: SetOperationColumnMatchKind::ByName,
+            strict: false,
+            columns: None,
+        })
+    );
+
+    // Prefix mode before the operator.
+    let (_, q, mode, cm) = set_op(
+        bigquery()
+            .verified_stmt("SELECT 1 AS b, 2 AS a INNER UNION ALL BY NAME SELECT 3 AS b, 4 AS a"),
+    );
+    assert_eq!(q, SetQuantifier::All);
+    assert_eq!(mode, Some(SetOperationMode::Inner));
+    assert_eq!(cm.unwrap().kind, SetOperationColumnMatchKind::ByName);
+
+    // Prefix mode with `OUTER` plus an explicit `ON (...)` list.
+    let (_, _, mode, cm) = set_op(bigquery().verified_stmt(
+        "SELECT 1 AS a, 2 AS b FULL OUTER UNION ALL BY NAME ON (a, b) SELECT 3 AS b, 4 AS a",
+    ));
+    assert_eq!(mode, Some(SetOperationMode::FullOuter));
+    assert_eq!(
+        cm,
+        Some(SetOperationColumnMatch {
+            kind: SetOperationColumnMatchKind::ByName,
+            strict: false,
+            columns: Some(vec![Ident::new("a"), Ident::new("b")]),
+        })
+    );
+
+    // `CORRESPONDING` is a distinct spelling from `BY NAME` and round-trips.
+    let (_, _, mode, cm) = set_op(
+        bigquery().verified_stmt("SELECT 1 AS a LEFT UNION ALL CORRESPONDING BY (a) SELECT 4 AS a"),
+    );
+    assert_eq!(mode, Some(SetOperationMode::Left));
+    assert_eq!(
+        cm,
+        Some(SetOperationColumnMatch {
+            kind: SetOperationColumnMatchKind::Corresponding,
+            strict: false,
+            columns: Some(vec![Ident::new("a")]),
+        })
+    );
+
+    // `STRICT CORRESPONDING` round-trips with the strict flag set.
+    let (_, _, mode, cm) = set_op(
+        bigquery().verified_stmt("SELECT 1 AS a UNION ALL STRICT CORRESPONDING SELECT 2 AS a"),
+    );
+    assert_eq!(mode, None);
+    assert_eq!(
+        cm,
+        Some(SetOperationColumnMatch {
+            kind: SetOperationColumnMatchKind::Corresponding,
+            strict: true,
+            columns: None,
+        })
+    );
+
+    // A prefix mode after an unaliased select item is a mode, not that item's
+    // alias, so it must not be swallowed.
+    let (_, _, mode, cm) =
+        set_op(bigquery().verified_stmt("SELECT 1 INNER UNION ALL BY NAME SELECT 2"));
+    assert_eq!(mode, Some(SetOperationMode::Inner));
+    assert_eq!(cm.unwrap().kind, SetOperationColumnMatchKind::ByName);
+}
+
+#[test]
 fn parse_at_at_identifier() {
     bigquery().verified_stmt("SELECT @@error.stack_trace, @@error.message");
 }
