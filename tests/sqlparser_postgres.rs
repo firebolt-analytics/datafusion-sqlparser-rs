@@ -3403,6 +3403,8 @@ fn parse_array_subquery_expr() {
                 body: Box::new(SetExpr::SetOperation {
                     op: SetOperator::Union,
                     set_quantifier: SetQuantifier::None,
+                    mode: None,
+                    column_match: None,
                     left: Box::new(SetExpr::Select(Box::new(Select {
                         select_token: AttachedToken::empty(),
                         optimizer_hints: vec![],

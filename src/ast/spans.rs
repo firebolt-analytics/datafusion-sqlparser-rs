@@ -224,6 +224,8 @@ impl Spanned for SetExpr {
             SetExpr::SetOperation {
                 op: _,
                 set_quantifier: _,
+                mode: _,
+                column_match: _,
                 left,
                 right,
             } => left.span().union(&right.span()),
