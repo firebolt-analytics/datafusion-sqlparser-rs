@@ -160,8 +160,14 @@ pub enum SetExpr {
         left: Box<SetExpr>,
         /// The set operator used (e.g. `UNION`, `EXCEPT`).
         op: SetOperator,
-        /// Optional quantifier (`ALL`, `DISTINCT`, etc.).
+        /// Optional quantifier (`ALL`, `DISTINCT`).
         set_quantifier: SetQuantifier,
+        /// GoogleSQL column-propagation mode prefix before the operator, e.g. the
+        /// `FULL` in `FULL UNION ALL BY NAME`.
+        mode: Option<SetOperationMode>,
+        /// Column matching after the quantifier: `BY NAME [ON (...)]` or
+        /// `[STRICT] CORRESPONDING [BY (...)]`.
+        column_match: Option<SetOperationColumnMatch>,
         /// Right operand of the set operation.
         right: Box<SetExpr>,
     },
@@ -210,20 +216,26 @@ impl fmt::Display for SetExpr {
                 right,
                 op,
                 set_quantifier,
+                mode,
+                column_match,
             } => {
                 left.fmt(f)?;
                 SpaceOrNewline.fmt(f)?;
+                if let Some(mode) = mode {
+                    mode.fmt(f)?;
+                    f.write_str(" ")?;
+                }
                 op.fmt(f)?;
                 match set_quantifier {
-                    SetQuantifier::All
-                    | SetQuantifier::Distinct
-                    | SetQuantifier::ByName
-                    | SetQuantifier::AllByName
-                    | SetQuantifier::DistinctByName => {
+                    SetQuantifier::All | SetQuantifier::Distinct => {
                         f.write_str(" ")?;
                         set_quantifier.fmt(f)?;
                     }
                     SetQuantifier::None => {}
+                }
+                if let Some(column_match) = column_match {
+                    f.write_str(" ")?;
+                    column_match.fmt(f)?;
                 }
                 SpaceOrNewline.fmt(f)?;
                 right.fmt(f)?;
@@ -259,6 +271,95 @@ impl fmt::Display for SetOperator {
     }
 }
 
+/// The column-propagation mode prefix that may precede a set operator in
+/// GoogleSQL, e.g. the `FULL` in `FULL UNION ALL BY NAME`.
+///
+/// See [GoogleSQL set operators].
+///
+/// [GoogleSQL set operators]: https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#set_operators
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum SetOperationMode {
+    /// `INNER`: keep only columns present in both inputs.
+    Inner,
+    /// `LEFT`: keep the left input's columns.
+    Left,
+    /// `LEFT OUTER`: same as `LEFT`.
+    LeftOuter,
+    /// `FULL`: keep columns from both inputs, NULL-filling the gaps.
+    Full,
+    /// `FULL OUTER`: same as `FULL`.
+    FullOuter,
+}
+
+impl fmt::Display for SetOperationMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            SetOperationMode::Inner => "INNER",
+            SetOperationMode::Left => "LEFT",
+            SetOperationMode::LeftOuter => "LEFT OUTER",
+            SetOperationMode::Full => "FULL",
+            SetOperationMode::FullOuter => "FULL OUTER",
+        })
+    }
+}
+
+/// Column matching for a set operation: the `BY NAME` / `CORRESPONDING` clause
+/// after the quantifier. The two spellings are equivalent apart from their
+/// default semantics (`BY NAME` is strict; bare `CORRESPONDING` is `INNER`) and
+/// the column-list keyword (`ON` vs `BY`).
+///
+/// See [GoogleSQL set operators].
+///
+/// [GoogleSQL set operators]: https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#set_operators
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct SetOperationColumnMatch {
+    /// The spelling used (`BY NAME` or `CORRESPONDING`).
+    pub kind: SetOperationColumnMatchKind,
+    /// The `STRICT` keyword, valid only before `CORRESPONDING`.
+    pub strict: bool,
+    /// The explicit column list, if any: `BY NAME ON (cols)` /
+    /// `CORRESPONDING BY (cols)`.
+    pub columns: Option<Vec<Ident>>,
+}
+
+impl fmt::Display for SetOperationColumnMatch {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.kind {
+            SetOperationColumnMatchKind::ByName => {
+                f.write_str("BY NAME")?;
+                if let Some(columns) = &self.columns {
+                    write!(f, " ON ({})", display_comma_separated(columns))?;
+                }
+            }
+            SetOperationColumnMatchKind::Corresponding => {
+                if self.strict {
+                    f.write_str("STRICT ")?;
+                }
+                f.write_str("CORRESPONDING")?;
+                if let Some(columns) = &self.columns {
+                    write!(f, " BY ({})", display_comma_separated(columns))?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Which column-matching spelling a [`SetOperationColumnMatch`] used.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum SetOperationColumnMatchKind {
+    /// `BY NAME` — strict column matching (DuckDB and GoogleSQL).
+    ByName,
+    /// `CORRESPONDING` — standard SQL column matching.
+    Corresponding,
+}
+
 /// A quantifier for [SetOperator].
 // TODO: Restrict parsing specific SetQuantifier in some specific dialects.
 // For example, BigQuery does not support `DISTINCT` for `EXCEPT` and `INTERSECT`
@@ -270,12 +371,6 @@ pub enum SetQuantifier {
     All,
     /// `DISTINCT` quantifier
     Distinct,
-    /// `BY NAME` quantifier
-    ByName,
-    /// `ALL BY NAME` quantifier
-    AllByName,
-    /// `DISTINCT BY NAME` quantifier
-    DistinctByName,
     /// No quantifier specified
     None,
 }
@@ -285,9 +380,6 @@ impl fmt::Display for SetQuantifier {
         match self {
             SetQuantifier::All => write!(f, "ALL"),
             SetQuantifier::Distinct => write!(f, "DISTINCT"),
-            SetQuantifier::ByName => write!(f, "BY NAME"),
-            SetQuantifier::AllByName => write!(f, "ALL BY NAME"),
-            SetQuantifier::DistinctByName => write!(f, "DISTINCT BY NAME"),
             SetQuantifier::None => Ok(()),
         }
     }
@@ -3266,6 +3358,8 @@ pub enum PipeOperator {
     Union {
         /// Set quantifier (`ALL` or `DISTINCT`).
         set_quantifier: SetQuantifier,
+        /// Optional `BY NAME` / `CORRESPONDING` column matching.
+        column_match: Option<SetOperationColumnMatch>,
         /// The queries to combine with `UNION`.
         queries: Vec<Query>,
     },
@@ -3277,6 +3371,8 @@ pub enum PipeOperator {
     Intersect {
         /// Set quantifier for the `INTERSECT` operator.
         set_quantifier: SetQuantifier,
+        /// Optional `BY NAME` / `CORRESPONDING` column matching.
+        column_match: Option<SetOperationColumnMatch>,
         /// The queries to intersect.
         queries: Vec<Query>,
     },
@@ -3288,6 +3384,8 @@ pub enum PipeOperator {
     Except {
         /// Set quantifier for the `EXCEPT` operator.
         set_quantifier: SetQuantifier,
+        /// Optional `BY NAME` / `CORRESPONDING` column matching.
+        column_match: Option<SetOperationColumnMatch>,
         /// The queries to exclude from the input set.
         queries: Vec<Query>,
     },
@@ -3401,16 +3499,19 @@ impl fmt::Display for PipeOperator {
             }
             PipeOperator::Union {
                 set_quantifier,
+                column_match,
                 queries,
-            } => Self::fmt_set_operation(f, "UNION", set_quantifier, queries),
+            } => Self::fmt_set_operation(f, "UNION", set_quantifier, column_match, queries),
             PipeOperator::Intersect {
                 set_quantifier,
+                column_match,
                 queries,
-            } => Self::fmt_set_operation(f, "INTERSECT", set_quantifier, queries),
+            } => Self::fmt_set_operation(f, "INTERSECT", set_quantifier, column_match, queries),
             PipeOperator::Except {
                 set_quantifier,
+                column_match,
                 queries,
-            } => Self::fmt_set_operation(f, "EXCEPT", set_quantifier, queries),
+            } => Self::fmt_set_operation(f, "EXCEPT", set_quantifier, column_match, queries),
             PipeOperator::Call { function, alias } => {
                 write!(f, "CALL {function}")?;
                 Self::fmt_optional_alias(f, alias)
@@ -3464,6 +3565,7 @@ impl PipeOperator {
         f: &mut fmt::Formatter<'_>,
         operation: &str,
         set_quantifier: &SetQuantifier,
+        column_match: &Option<SetOperationColumnMatch>,
         queries: &[Query],
     ) -> fmt::Result {
         write!(f, "{operation}")?;
@@ -3472,6 +3574,9 @@ impl PipeOperator {
             _ => {
                 write!(f, " {set_quantifier}")?;
             }
+        }
+        if let Some(column_match) = column_match {
+            write!(f, " {column_match}")?;
         }
         write!(f, " ")?;
         let parenthesized_queries: Vec<String> =

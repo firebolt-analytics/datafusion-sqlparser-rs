@@ -12940,7 +12940,7 @@ impl<'a> Parser<'a> {
     ) -> Result<SetQuantifier, ParserError> {
         let quantifier = self.parse_set_quantifier(&Some(SetOperator::Intersect));
         match quantifier {
-            SetQuantifier::Distinct | SetQuantifier::DistinctByName => Ok(quantifier),
+            SetQuantifier::Distinct => Ok(quantifier),
             _ => Err(ParserError::ParserError(format!(
                 "{operator_name} pipe operator requires DISTINCT modifier",
             ))),
@@ -12960,9 +12960,36 @@ impl<'a> Parser<'a> {
     /// Optionally parses an alias for a select list item
     fn maybe_parse_select_item_alias(&mut self) -> Result<Option<Ident>, ParserError> {
         fn validator(explicit: bool, kw: &Keyword, parser: &mut Parser) -> bool {
+            // A set-operation column-propagation mode keyword (`INNER`/`LEFT`/
+            // `FULL` [`OUTER`]) directly before a set operator opens the next set
+            // operation -- it must not be captured as the preceding item's alias.
+            if !explicit && parser.peek_set_operation_mode_after(kw) {
+                return false;
+            }
             parser.dialect.is_select_item_alias(explicit, kw, parser)
         }
         self.parse_optional_alias_inner(None, validator)
+    }
+
+    /// Given a just-consumed keyword `kw`, returns true if it is a set-operation
+    /// column-propagation mode prefix (`INNER`, or `FULL`/`LEFT` optionally
+    /// followed by `OUTER`) that is immediately followed by a set operator.
+    fn peek_set_operation_mode_after(&self, kw: &Keyword) -> bool {
+        let ahead = match kw {
+            Keyword::INNER => 0,
+            Keyword::LEFT | Keyword::FULL => usize::from(
+                matches!(self.peek_token().token, Token::Word(w) if w.keyword == Keyword::OUTER),
+            ),
+            _ => return false,
+        };
+        matches!(
+            self.peek_nth_token(ahead).token,
+            Token::Word(w)
+                if matches!(
+                    w.keyword,
+                    Keyword::UNION | Keyword::INTERSECT | Keyword::EXCEPT | Keyword::MINUS
+                )
+        )
     }
 
     /// Optionally parses an alias for a table like in `... FROM generate_series(1, 10) AS t (col)`.
@@ -14379,26 +14406,32 @@ impl<'a> Parser<'a> {
                 }
                 Keyword::UNION => {
                     let set_quantifier = self.parse_set_quantifier(&Some(SetOperator::Union));
+                    let column_match = self.parse_set_operation_column_match()?;
                     let queries = self.parse_pipe_operator_queries()?;
                     pipe_operators.push(PipeOperator::Union {
                         set_quantifier,
+                        column_match,
                         queries,
                     });
                 }
                 Keyword::INTERSECT => {
                     let set_quantifier =
                         self.parse_distinct_required_set_quantifier("INTERSECT")?;
+                    let column_match = self.parse_set_operation_column_match()?;
                     let queries = self.parse_pipe_operator_queries()?;
                     pipe_operators.push(PipeOperator::Intersect {
                         set_quantifier,
+                        column_match,
                         queries,
                     });
                 }
                 Keyword::EXCEPT => {
                     let set_quantifier = self.parse_distinct_required_set_quantifier("EXCEPT")?;
+                    let column_match = self.parse_set_operation_column_match()?;
                     let queries = self.parse_pipe_operator_queries()?;
                     pipe_operators.push(PipeOperator::Except {
                         set_quantifier,
+                        column_match,
                         queries,
                     });
                 }
@@ -14739,8 +14772,10 @@ impl<'a> Parser<'a> {
         precedence: u8,
     ) -> Result<Box<SetExpr>, ParserError> {
         loop {
-            // The query can be optionally followed by a set operator:
-            let op = self.parse_set_operator(&self.peek_token().token);
+            // The query can be optionally followed by a BigQuery column-matching
+            // mode prefix and then a set operator:
+            let (mode, mode_tokens) = self.peek_set_operation_mode();
+            let op = self.parse_set_operator(&self.peek_nth_token(mode_tokens).token);
             let next_precedence = match op {
                 // UNION and EXCEPT have the same binding power and evaluate left-to-right
                 Some(SetOperator::Union) | Some(SetOperator::Except) | Some(SetOperator::Minus) => {
@@ -14754,12 +14789,18 @@ impl<'a> Parser<'a> {
             if precedence >= next_precedence {
                 break;
             }
+            for _ in 0..mode_tokens {
+                self.next_token(); // skip past the mode prefix (and OUTER)
+            }
             self.next_token(); // skip past the set operator
             let set_quantifier = self.parse_set_quantifier(&op);
+            let column_match = self.parse_set_operation_column_match()?;
             expr = SetExpr::SetOperation {
                 left: Box::new(expr),
                 op: op.unwrap(),
                 set_quantifier,
+                mode,
+                column_match,
                 right: self.parse_query_body(next_precedence)?,
             };
         }
@@ -14778,7 +14819,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a set quantifier (e.g., `ALL`, `DISTINCT BY NAME`) for the given set operator.
+    /// Parse a set quantifier (`ALL` / `DISTINCT`) for the given set operator.
     pub fn parse_set_quantifier(&mut self, op: &Option<SetOperator>) -> SetQuantifier {
         match op {
             Some(
@@ -14787,16 +14828,8 @@ impl<'a> Parser<'a> {
                 | SetOperator::Union
                 | SetOperator::Minus,
             ) => {
-                if self.parse_keywords(&[Keyword::DISTINCT, Keyword::BY, Keyword::NAME]) {
-                    SetQuantifier::DistinctByName
-                } else if self.parse_keywords(&[Keyword::BY, Keyword::NAME]) {
-                    SetQuantifier::ByName
-                } else if self.parse_keyword(Keyword::ALL) {
-                    if self.parse_keywords(&[Keyword::BY, Keyword::NAME]) {
-                        SetQuantifier::AllByName
-                    } else {
-                        SetQuantifier::All
-                    }
+                if self.parse_keyword(Keyword::ALL) {
+                    SetQuantifier::All
                 } else if self.parse_keyword(Keyword::DISTINCT) {
                     SetQuantifier::Distinct
                 } else {
@@ -14805,6 +14838,84 @@ impl<'a> Parser<'a> {
             }
             _ => SetQuantifier::None,
         }
+    }
+
+    /// Peek for a GoogleSQL column-propagation mode prefix (`INNER`, or
+    /// `FULL`/`LEFT` with an optional `OUTER`) and return it with the token count
+    /// it occupies. Only recognized when a set operator follows (otherwise
+    /// `INNER`/`LEFT`/`FULL` begin a JOIN); consumes nothing.
+    fn peek_set_operation_mode(&mut self) -> (Option<SetOperationMode>, usize) {
+        let (base, has_outer) = match self.peek_token().token {
+            Token::Word(w) if w.keyword == Keyword::INNER => (SetOperationMode::Inner, false),
+            Token::Word(w) if w.keyword == Keyword::LEFT || w.keyword == Keyword::FULL => {
+                let outer = matches!(self.peek_nth_token(1).token, Token::Word(o) if o.keyword == Keyword::OUTER);
+                let base = if w.keyword == Keyword::LEFT {
+                    if outer {
+                        SetOperationMode::LeftOuter
+                    } else {
+                        SetOperationMode::Left
+                    }
+                } else if outer {
+                    SetOperationMode::FullOuter
+                } else {
+                    SetOperationMode::Full
+                };
+                (base, outer)
+            }
+            _ => return (None, 0),
+        };
+        let tokens = if has_outer { 2 } else { 1 };
+        // Only treat this as a set-op mode if a set operator follows.
+        if self
+            .parse_set_operator(&self.peek_nth_token(tokens).token)
+            .is_some()
+        {
+            (Some(base), tokens)
+        } else {
+            (None, 0)
+        }
+    }
+
+    /// Parse the optional column-matching clause that follows the set-operation
+    /// quantifier: `BY NAME [ON (cols)]` or `[STRICT] CORRESPONDING [BY (cols)]`.
+    fn parse_set_operation_column_match(
+        &mut self,
+    ) -> Result<Option<SetOperationColumnMatch>, ParserError> {
+        let parse_columns = |parser: &mut Self| -> Result<Vec<Ident>, ParserError> {
+            parser.expect_token(&Token::LParen)?;
+            let columns = parser.parse_comma_separated(Parser::parse_identifier)?;
+            parser.expect_token(&Token::RParen)?;
+            Ok(columns)
+        };
+        if self.parse_keywords(&[Keyword::BY, Keyword::NAME]) {
+            let columns = self
+                .parse_keyword(Keyword::ON)
+                .then(|| parse_columns(self))
+                .transpose()?;
+            return Ok(Some(SetOperationColumnMatch {
+                kind: SetOperationColumnMatchKind::ByName,
+                strict: false,
+                columns,
+            }));
+        }
+        // `STRICT` is only consumed as part of `STRICT CORRESPONDING`.
+        let strict = matches!(self.peek_token().token, Token::Word(w) if w.keyword == Keyword::STRICT)
+            && matches!(self.peek_nth_token(1).token, Token::Word(w) if w.keyword == Keyword::CORRESPONDING);
+        if strict {
+            self.next_token();
+        }
+        if self.parse_keyword(Keyword::CORRESPONDING) {
+            let columns = self
+                .parse_keyword(Keyword::BY)
+                .then(|| parse_columns(self))
+                .transpose()?;
+            return Ok(Some(SetOperationColumnMatch {
+                kind: SetOperationColumnMatchKind::Corresponding,
+                strict,
+                columns,
+            }));
+        }
+        Ok(None)
     }
 
     /// Parse a restricted `SELECT` statement (no CTEs / `UNION` / `ORDER BY`)
