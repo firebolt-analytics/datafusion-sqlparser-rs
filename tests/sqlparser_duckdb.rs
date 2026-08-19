@@ -435,7 +435,8 @@ fn test_duckdb_struct_literal() {
                     (Value::SingleQuotedString("abc".to_string())).with_empty_span()
                 )),
             },],)],
-            named: false
+            named: false,
+            element_type: None,
         }),
         expr_from_projection(&select.projection[1])
     );
@@ -452,7 +453,8 @@ fn test_duckdb_struct_literal() {
                         Ident::from("t"),
                         Ident::from("str_col")
                     ])],
-                    named: false
+                    named: false,
+                    element_type: None,
                 })),
             },
         ],),
@@ -691,7 +693,8 @@ fn test_array_index() {
                     Expr::Value((Value::SingleQuotedString("b".to_owned())).with_empty_span()),
                     Expr::Value((Value::SingleQuotedString("c".to_owned())).with_empty_span())
                 ],
-                named: false
+                named: false,
+                element_type: None,
             })),
             access_chain: vec![AccessExpr::Subscript(Subscript::Index {
                 index: Expr::value(number("3"))

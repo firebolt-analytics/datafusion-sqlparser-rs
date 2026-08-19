@@ -474,10 +474,23 @@ pub struct Array {
 
     /// `true` for  `ARRAY[..]`, `false` for `[..]`
     pub named: bool,
+
+    /// The declared element type of a typed array literal, e.g. `INT64` in
+    /// `ARRAY<INT64>[1, 2, 3]` (BigQuery). `None` for an untyped `[..]` /
+    /// `ARRAY[..]`.
+    pub element_type: Option<DataType>,
 }
 
 impl fmt::Display for Array {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(element_type) = &self.element_type {
+            return write!(
+                f,
+                "ARRAY<{}>[{}]",
+                element_type,
+                display_comma_separated(&self.elem)
+            );
+        }
         write!(
             f,
             "{}[{}]",

@@ -1616,6 +1616,23 @@ impl<'a> Parser<'a> {
                 self.expect_token(&Token::LBracket)?;
                 Ok(Some(self.parse_array_expr(true)?))
             }
+            // Typed array literal, e.g. `ARRAY<INT64>[1, 2, 3]` (BigQuery).
+            Keyword::ARRAY
+                if self.dialect.supports_array_typed_literal()
+                    && self.peek_token_ref().token == Token::Lt =>
+            {
+                self.expect_token(&Token::Lt)?;
+                let (element_type, trailing_bracket) = self.parse_data_type_helper()?;
+                self.expect_closing_angle_bracket(trailing_bracket)?;
+                self.expect_token(&Token::LBracket)?;
+                let elem = self.parse_comma_separated0(Parser::parse_expr, Token::RBracket)?;
+                self.expect_token(&Token::RBracket)?;
+                Ok(Some(Expr::Array(Array {
+                    elem,
+                    named: true,
+                    element_type: Some(element_type),
+                })))
+            }
             Keyword::ARRAY
             if self.peek_token_ref().token == Token::LParen
                 && !dialect_of!(self is ClickHouseDialect | DatabricksDialect) =>
@@ -3132,7 +3149,11 @@ impl<'a> Parser<'a> {
     pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
         let exprs = self.parse_comma_separated0(Parser::parse_expr, Token::RBracket)?;
         self.expect_token(&Token::RBracket)?;
-        Ok(Expr::Array(Array { elem: exprs, named }))
+        Ok(Expr::Array(Array {
+            elem: exprs,
+            named,
+            element_type: None,
+        }))
     }
 
     /// Parse the `ON OVERFLOW` clause for `LISTAGG`.

@@ -647,6 +647,13 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Return true if the dialect supports a typed array literal, where the
+    /// element type is given in angle brackets before the elements, e.g.
+    /// `ARRAY<INT64>[1, 2, 3]` (BigQuery).
+    fn supports_array_typed_literal(&self) -> bool {
+        false
+    }
+
     /// Return true if the dialect supports empty projections in SELECT statements
     ///
     /// Example

@@ -3127,3 +3127,42 @@ fn parse_bigquery_create_vector_index() {
     }
     bigquery().verified_stmt("CREATE VECTOR INDEX emb ON t(embedding)");
 }
+
+#[test]
+fn parse_typed_array_literal() {
+    // Typed array literal `ARRAY<T>[...]`: the element type is carried on the
+    // `Array` node and round-trips. Scalar, empty, nested struct and nested
+    // array element types are all supported.
+    for sql in [
+        "SELECT ARRAY<INT64>[1, 2, 3]",
+        "SELECT ARRAY<STRING>['a', 'b']",
+        "SELECT ARRAY<INT64>[]",
+        "SELECT ARRAY<STRUCT<a INT64, b STRING>>[(1, 'x'), (2, 'y')]",
+        "SELECT ARRAY<ARRAY<INT64>>[ARRAY<INT64>[1], ARRAY<INT64>[2]]",
+    ] {
+        bigquery().verified_stmt(sql);
+    }
+
+    // The element type is recorded on the AST.
+    let Statement::Query(query) = bigquery().verified_stmt("SELECT ARRAY<INT64>[1, 2, 3]") else {
+        panic!("expected a query");
+    };
+    let SelectItem::UnnamedExpr(Expr::Array(array)) =
+        &query.body.as_select().unwrap().projection[0]
+    else {
+        panic!("expected an array expression");
+    };
+    assert!(array.named);
+    assert_eq!(array.element_type, Some(DataType::Int64));
+
+    // Untyped arrays keep `element_type` as `None`.
+    let Statement::Query(query) = bigquery().verified_stmt("SELECT [1, 2, 3]") else {
+        panic!("expected a query");
+    };
+    let SelectItem::UnnamedExpr(Expr::Array(array)) =
+        &query.body.as_select().unwrap().projection[0]
+    else {
+        panic!("expected an array expression");
+    };
+    assert_eq!(array.element_type, None);
+}

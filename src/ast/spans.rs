@@ -1727,7 +1727,8 @@ impl Spanned for Array {
     fn span(&self) -> Span {
         let Array {
             elem,
-            named: _, // bool
+            named: _,        // bool
+            element_type: _, // DataType, not spanned
         } = self;
 
         union_spans(elem.iter().map(|i| i.span()))
