@@ -2679,6 +2679,7 @@ fn parse_pg_regex_match_ops() {
                         Expr::Value(single_quoted_string("x").with_empty_span()),
                     ],
                     named: true,
+                    element_type: None,
                 })),
                 is_some: false,
             }),
@@ -2720,6 +2721,7 @@ fn parse_pg_like_match_ops() {
                 right: Box::new(Expr::Array(Array {
                     elem: vec![Expr::Value(single_quoted_string("a_c%").with_empty_span())],
                     named: true,
+                    element_type: None,
                 })),
             }),
             select.projection[0]
@@ -2800,8 +2802,10 @@ fn parse_array_index_expr() {
                     elem: vec![Expr::Array(Array {
                         elem: vec![num[2].clone(), num[3].clone(),],
                         named: true,
+                        element_type: None,
                     })],
                     named: true,
+                    element_type: None,
                 })),
                 data_type: DataType::Array(ArrayElemTypeDef::SquareBracket(
                     Box::new(DataType::Array(ArrayElemTypeDef::SquareBracket(
@@ -2829,7 +2833,8 @@ fn parse_array_index_expr() {
     assert_eq!(
         &Expr::Array(sqlparser::ast::Array {
             elem: vec![],
-            named: true
+            named: true,
+            element_type: None,
         }),
         expr_from_projection(only(&select.projection)),
     );
@@ -3821,6 +3826,7 @@ fn test_json() {
                     Expr::Value((Value::SingleQuotedString("b".to_string())).with_empty_span()),
                 ],
                 named: true,
+                element_type: None,
             })),
         }),
         select.projection[0],
@@ -3876,7 +3882,8 @@ fn test_json() {
                     Expr::Value((Value::SingleQuotedString("b".to_string())).with_empty_span()),
                     Expr::Value((Value::SingleQuotedString("c".to_string())).with_empty_span())
                 ],
-                named: true
+                named: true,
+                element_type: None,
             }))
         },
         select.selection.unwrap(),
@@ -3893,7 +3900,8 @@ fn test_json() {
                     Expr::Value((Value::SingleQuotedString("b".to_string())).with_empty_span()),
                     Expr::Value((Value::SingleQuotedString("c".to_string())).with_empty_span())
                 ],
-                named: true
+                named: true,
+                element_type: None,
             }))
         },
         select.selection.unwrap(),
@@ -4073,7 +4081,8 @@ fn test_composite_value() {
                                     (Value::SingleQuotedString("i".to_string())).with_empty_span()
                                 ),
                             ],
-                            named: true
+                            named: true,
+                            element_type: None,
                         }
                     )))],
                     clauses: vec![],

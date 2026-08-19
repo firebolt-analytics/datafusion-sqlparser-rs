@@ -14307,6 +14307,7 @@ fn test_map_syntax() {
                     key: Box::new(Expr::Array(Array {
                         elem: vec![number_expr("1"), number_expr("2"), number_expr("3")],
                         named: false,
+                        element_type: None,
                     })),
                     value: Box::new(Expr::value(number("10.0"))),
                 },
@@ -14314,6 +14315,7 @@ fn test_map_syntax() {
                     key: Box::new(Expr::Array(Array {
                         elem: vec![number_expr("4"), number_expr("5"), number_expr("6")],
                         named: false,
+                        element_type: None,
                     })),
                     value: Box::new(Expr::value(number("20.0"))),
                 },
@@ -14377,6 +14379,7 @@ fn test_map_syntax() {
                     value: Box::new(Expr::Array(Array {
                         elem: vec![number_expr("1"), null_expr(), number_expr("3")],
                         named: false,
+                        element_type: None,
                     })),
                 },
                 MapEntry {
@@ -14384,6 +14387,7 @@ fn test_map_syntax() {
                     value: Box::new(Expr::Array(Array {
                         elem: vec![number_expr("4"), null_expr(), number_expr("6")],
                         named: false,
+                        element_type: None,
                     })),
                 },
                 MapEntry {
@@ -14391,6 +14395,7 @@ fn test_map_syntax() {
                     value: Box::new(Expr::Array(Array {
                         elem: vec![number_expr("7"), number_expr("8"), number_expr("9")],
                         named: false,
+                        element_type: None,
                     })),
                 },
             ],

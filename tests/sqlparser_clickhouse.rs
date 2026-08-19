@@ -121,6 +121,7 @@ fn parse_array_expr() {
                 Expr::value(Value::SingleQuotedString("2".to_string())),
             ],
             named: false,
+            element_type: None,
         }),
         expr_from_projection(only(&select.projection))
     )
