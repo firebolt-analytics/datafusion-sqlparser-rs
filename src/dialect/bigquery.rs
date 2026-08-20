@@ -126,6 +126,11 @@ impl Dialect for BigQueryDialect {
         true
     }
 
+    // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#array_type
+    fn supports_array_typed_literal(&self) -> bool {
+        true
+    }
+
     /// See <https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#select_expression_star>
     fn supports_select_expr_star(&self) -> bool {
         true
