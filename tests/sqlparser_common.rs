@@ -23633,3 +23633,25 @@ fn parse_only_table_name() {
         dialects.verified_stmt(sql);
     }
 }
+
+/// A chain of `IN (` used to cost 2^depth: ~300 bytes took over 20 seconds.
+#[test]
+fn parse_in_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = "SELECT NOT IN(\n".repeat(40);
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = Parser::new(&GenericDialect {})
+            .with_recursion_limit(256)
+            .try_with_sql(&sql)
+            .and_then(|mut p| p.parse_statements());
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("parser should reject this quickly, not loop exponentially");
+}
