@@ -39,3 +39,23 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## Pull Request Guidelines
 1. PR title should follow this format: `<DIALECT>: <SHORT DESCRIPTION>`, For example, `Showflake: Add support for casting to VARIANT`.
 2. Make the PR comment short, provide an example of what was not working and a short description of the fix. Be succint.
+
+## Matching Upstream Conventions
+
+This is a fork of `apache/datafusion-sqlparser-rs` and changes here are expected to go upstream. Everything an agent produces — code, comments, commit messages, PR descriptions, tests — should be indistinguishable in style and length from what is already in the repository. Upstream reviewers reject verbose contributions, and LLM agents default to writing far more prose than this project uses. When in doubt, read three neighbouring commits or functions and match them.
+
+1. **Comments**: explain a non-obvious *why* in one or two lines, then stop. A typical upstream parser fix adds 5–7 comment lines in total. Do not narrate what the code does, restate the commit message, or leave a design essay above a function.
+2. **Commit messages**: subject line in the existing style (`<Dialect>: <short description>`, or `Parser: <short description>` for dialect-independent parser changes). Most upstream commits have no body at all; the longest run to about 20 lines. If a body is warranted, state the bug, a minimal example, and the fix — nothing else.
+3. **PR descriptions**: same budget as the commit body. See the Pull Request Guidelines above.
+4. **Tests**: follow the Unit Tests Guidelines above and match the assertion style of the tests already in the file. Add the cases that pin the behaviour and no more; a long table of near-duplicate inputs is noise. Do not add commentary to a test that the test name and SQL already convey.
+5. **No ticket references or internal identifiers** in code, comments, tests, or commit messages. Firebolt ticket IDs (`FB-XXXX`) are meaningless upstream. Describe the problem instead.
+6. **Do not restate measurements you did not take.** Timings, call counts and "all N dialects affected" claims belong in a commit body only if you measured them; keep them to one clause.
+
+### Reviewing Agents
+
+Review comments follow the same budget as everything else — a few sentences, pointing at the specific line and the specific consequence.
+
+1. Do not summarise the diff back to the author, restate the PR description, or open with praise.
+2. One comment per real issue. Skip style nits that `cargo fmt` and `cargo clippy` already enforce.
+3. Say plainly whether a finding is a correctness bug, a behaviour change, or a suggestion — and if it is a behaviour change, name an input whose result changes.
+4. If a review finding is right, fix it and say so in one or two sentences. Do not write a post-mortem.
