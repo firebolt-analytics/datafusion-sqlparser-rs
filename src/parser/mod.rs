@@ -373,6 +373,9 @@ pub struct Parser<'a> {
     /// `parse_table_factor`. See [`Parser::parse_table_factor`] for the 2^N
     /// pattern this guards.
     failed_derived_table_factor_positions: BTreeSet<usize>,
+    /// Cached failures from the speculative subquery arm of `parse_in`. See
+    /// [`Parser::parse_in`] for the 2^N pattern this guards.
+    failed_in_subquery_positions: BTreeSet<usize>,
 }
 
 /// Copy marker for a [`ParserError`] cached by the `parse_prefix` failure
@@ -419,6 +422,7 @@ impl<'a> Parser<'a> {
             failed_prefix_positions: BTreeMap::new(),
             failed_reserved_word_prefix_positions: BTreeMap::new(),
             failed_derived_table_factor_positions: BTreeSet::new(),
+            failed_in_subquery_positions: BTreeSet::new(),
         }
     }
 
@@ -483,6 +487,7 @@ impl<'a> Parser<'a> {
         self.failed_prefix_positions.clear();
         self.failed_reserved_word_prefix_positions.clear();
         self.failed_derived_table_factor_positions.clear();
+        self.failed_in_subquery_positions.clear();
         self
     }
 
@@ -4417,7 +4422,22 @@ impl<'a> Parser<'a> {
             });
         }
         self.expect_token(&Token::LParen)?;
-        let in_op = match self.maybe_parse(|p| p.parse_query())? {
+        // Memoize failures to break the 2^N work on inputs like `SELECT NOT IN(...`, where
+        // the list fallback recurses back into `parse_in` over the same tail and re-attempts
+        // the identical speculative parse.
+        let subquery_pos = self.index;
+        let subquery = if self.failed_in_subquery_positions.contains(&subquery_pos) {
+            None
+        } else {
+            match self.maybe_parse(|p| p.parse_query())? {
+                Some(subquery) => Some(subquery),
+                None => {
+                    self.failed_in_subquery_positions.insert(subquery_pos);
+                    None
+                }
+            }
+        };
+        let in_op = match subquery {
             Some(subquery) => Expr::InSubquery {
                 expr: Box::new(expr),
                 subquery,

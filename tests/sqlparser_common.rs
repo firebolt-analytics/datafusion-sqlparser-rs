@@ -19011,3 +19011,54 @@ fn parse_function_arg_call_chain_no_exponential_blowup() {
     rx.recv_timeout(Duration::from_secs(5))
         .expect("parser should reject this quickly, not loop exponentially");
 }
+
+/// A chain of `IN (` used to cost 2^depth: ~300 bytes took over 20 seconds.
+#[test]
+fn parse_in_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = "SELECT NOT IN(\n".repeat(40);
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = Parser::new(&GenericDialect {})
+            .with_recursion_limit(256)
+            .try_with_sql(&sql)
+            .and_then(|mut p| p.parse_statements());
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("parser should reject this quickly, not loop exponentially");
+}
+
+/// Asserting only that these parse would miss a silent `InSubquery` -> `InList` change,
+/// since both succeed.
+#[test]
+fn parse_in_subquery_vs_list_dispatch() {
+    let cases = [
+        ("SELECT 1 WHERE x IN (SELECT a FROM t)", true),
+        (
+            "SELECT 1 WHERE x IN (WITH c AS (SELECT 1) SELECT * FROM c)",
+            true,
+        ),
+        ("SELECT 1 WHERE x IN (VALUES (1))", true),
+        ("SELECT 1 WHERE x IN (SELECT (1))", true),
+        ("SELECT 1 WHERE x IN (1, 2, 3)", false),
+        ("SELECT 1 WHERE x IN ((1), (2))", false),
+        ("SELECT 1 WHERE x IN (select)", false),
+        ("SELECT 1 WHERE x IN (select())", false),
+        ("SELECT 1 WHERE x IN (select.col)", false),
+    ];
+    for (sql, expects_subquery) in cases {
+        let ast = Parser::new(&GenericDialect {})
+            .try_with_sql(sql)
+            .and_then(|mut p| p.parse_statements())
+            .unwrap_or_else(|e| panic!("{sql} should parse, got {e}"));
+        let rendered = format!("{ast:?}");
+        assert_eq!(rendered.contains("InSubquery"), expects_subquery, "{sql}");
+        assert_eq!(rendered.contains("InList"), !expects_subquery, "{sql}");
+    }
+}
