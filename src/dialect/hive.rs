@@ -46,6 +46,12 @@ impl Dialect for HiveDialect {
             || ch == '}'
     }
 
+    /// `'%\_%'` keeps its backslash, as Hive's `unescapeSQLString` does, so a
+    /// LIKE pattern survives the literal.
+    fn ignores_wildcard_escapes(&self) -> bool {
+        true
+    }
+
     fn supports_filter_during_aggregation(&self) -> bool {
         true
     }

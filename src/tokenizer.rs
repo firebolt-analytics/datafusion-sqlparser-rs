@@ -2658,6 +2658,25 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_databricks_keeps_like_wildcard_escapes() {
+        use crate::dialect::DatabricksDialect;
+        // Backslash escapes are processed (`\n`), but `\%` and `\_` stay as
+        // written, as in Hive's unescapeSQLString, so LIKE patterns survive.
+        let dialect = DatabricksDialect {};
+        let tokens = Tokenizer::new(&dialect, r"SELECT '%\_%', '\%x', 'a\nb'")
+            .tokenize()
+            .unwrap();
+        let strings: Vec<String> = tokens
+            .into_iter()
+            .filter_map(|t| match t {
+                Token::SingleQuotedString(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(strings, vec![r"%\_%", r"\%x", "a\nb"]);
+    }
+
+    #[test]
     fn tokenize_select_1() {
         let sql = String::from("SELECT 1");
         let dialect = GenericDialect {};
