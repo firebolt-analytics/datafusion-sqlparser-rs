@@ -3173,3 +3173,22 @@ fn parse_bigquery_create_vector_index() {
     }
     bigquery().verified_stmt("CREATE VECTOR INDEX emb ON t(embedding)");
 }
+
+#[test]
+fn parse_lambda_in_array_function() {
+    // The body extends over the comparison: `e -> (e > 0)`, not `(e -> e) > 0`.
+    let select = bigquery().verified_only_select("SELECT ARRAY_INCLUDES([1], e -> e > 0)");
+    match &select.projection[0] {
+        SelectItem::UnnamedExpr(Expr::Function(f)) => match &f.args {
+            FunctionArguments::List(list) => match &list.args[1] {
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Lambda(l))) => {
+                    assert!(matches!(*l.body, Expr::BinaryOp { .. }));
+                }
+                other => panic!("expected a lambda, got {other:?}"),
+            },
+            other => panic!("unexpected args {other:?}"),
+        },
+        other => panic!("unexpected projection {other:?}"),
+    }
+    bigquery().verified_stmt("SELECT ARRAY_FIND([1, 2], (x, y) -> x > y)");
+}

@@ -127,6 +127,13 @@ impl Dialect for BigQueryDialect {
     }
 
     // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#constructing_a_struct
+    /// `ARRAY_INCLUDES(arr, e -> e > 0)` and the other array functions
+    /// that take a lambda; see
+    /// <https://cloud.google.com/bigquery/docs/reference/standard-sql/functions-reference#lambda>
+    fn supports_lambda_functions(&self) -> bool {
+        true
+    }
+
     fn supports_struct_literal(&self) -> bool {
         true
     }
