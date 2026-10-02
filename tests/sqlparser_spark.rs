@@ -369,18 +369,43 @@ fn test_pipe_operator() {
 
 #[test]
 fn test_table_statement() {
-    let stmt = spark().verified_stmt("TABLE t");
-    match stmt {
-        Statement::Query(q) => match *q.body {
-            SetExpr::Table(t) => assert_eq!(t.table_name.as_deref(), Some("t")),
-            _ => panic!("Expected a TABLE body"),
-        },
-        _ => panic!("Expected Query"),
-    }
-    spark().verified_stmt("TABLE db.t");
-    // The name is one or two parts; what follows belongs to the query.
-    spark().verified_stmt("TABLE t ORDER BY a DESC LIMIT 1");
-    spark().verified_stmt("TABLE db.t LIMIT 2");
+    // `TABLE t` is read as `SELECT * FROM t`, wherever a query body can go.
+    spark().one_statement_parses_to("TABLE t", "SELECT * FROM t");
+    spark().one_statement_parses_to("TABLE db.t", "SELECT * FROM db.t");
+    spark().one_statement_parses_to("TABLE cat.db.t", "SELECT * FROM cat.db.t");
+    spark().one_statement_parses_to("TABLE `My T`", "SELECT * FROM `My T`");
+    spark().one_statement_parses_to(
+        "TABLE t ORDER BY a DESC LIMIT 1",
+        "SELECT * FROM t ORDER BY a DESC LIMIT 1",
+    );
+    spark().one_statement_parses_to(
+        "TABLE t1 UNION ALL TABLE t2",
+        "SELECT * FROM t1 UNION ALL SELECT * FROM t2",
+    );
+    spark().one_statement_parses_to(
+        "SELECT a FROM t1 EXCEPT TABLE t2",
+        "SELECT a FROM t1 EXCEPT SELECT * FROM t2",
+    );
+    spark().one_statement_parses_to(
+        "WITH c AS (TABLE t) TABLE c",
+        "WITH c AS (SELECT * FROM t) SELECT * FROM c",
+    );
+    spark().one_statement_parses_to(
+        "CREATE TABLE t2 AS TABLE db.t1",
+        "CREATE TABLE t2 AS SELECT * FROM db.t1",
+    );
+    spark().one_statement_parses_to("INSERT INTO t2 TABLE t1", "INSERT INTO t2 SELECT * FROM t1");
+    let stmt = spark().one_statement_parses_to("TABLE `My T`", "SELECT * FROM `My T`");
+    let Statement::Query(q) = stmt else {
+        panic!("Expected Query")
+    };
+    let SetExpr::Select(select) = *q.body else {
+        panic!("Expected a SELECT body")
+    };
+    let TableFactor::Table { name, .. } = &select.from[0].relation else {
+        panic!("Expected a table")
+    };
+    assert_eq!(name.0[0].as_ident().unwrap().quote_style, Some('`'));
 }
 
 #[test]

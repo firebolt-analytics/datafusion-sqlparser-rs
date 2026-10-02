@@ -15223,7 +15223,25 @@ impl<'a> Parser<'a> {
             let is_mysql = dialect_of!(self is MySqlDialect);
             SetExpr::Values(self.parse_values(is_mysql, true)?)
         } else if self.parse_keyword(Keyword::TABLE) {
-            SetExpr::Table(Box::new(self.parse_as_table()?))
+            if self.dialect.supports_table_statement() {
+                // `TABLE t` is `SELECT * FROM t`; keeping the ObjectName
+                // preserves quoting, which the string-only `Table` drops.
+                let name = self.parse_object_name(false)?;
+                Self::select_star_from(TableFactor::Table {
+                    name,
+                    alias: None,
+                    args: None,
+                    with_hints: vec![],
+                    version: None,
+                    partitions: vec![],
+                    with_ordinality: false,
+                    json_path: None,
+                    sample: None,
+                    index_hints: vec![],
+                })
+            } else {
+                SetExpr::Table(Box::new(self.parse_as_table()?))
+            }
         } else {
             return self.expected_ref(
                 "SELECT, VALUES, or a subquery in the query body",
@@ -15820,6 +15838,15 @@ impl<'a> Parser<'a> {
             format_clause: None,
             pipe_operators: vec![],
         });
+        Self::select_star_from(TableFactor::Derived {
+            lateral: false,
+            subquery,
+            alias: Some(alias),
+            sample: None,
+        })
+    }
+
+    fn select_star_from(relation: TableFactor) -> SetExpr {
         SetExpr::Select(Box::new(Select {
             select_token: AttachedToken::empty(),
             optimizer_hints: vec![],
@@ -15831,12 +15858,7 @@ impl<'a> Parser<'a> {
             exclude: None,
             into: None,
             from: vec![TableWithJoins {
-                relation: TableFactor::Derived {
-                    lateral: false,
-                    subquery,
-                    alias: Some(alias),
-                    sample: None,
-                },
+                relation,
                 joins: vec![],
             }],
             lateral_views: vec![],
