@@ -1428,6 +1428,16 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
 
+                    // A type suffix on the literal (`1S`, `2.5D`, `3BD`) is part of the
+                    // number for the dialects that have them; it is checked ahead of the
+                    // numeric-prefix rule, which would otherwise read `1S` as a word.
+                    if self.dialect.supports_typed_numeric_literal_suffix() {
+                        if let Some(suffix) = self.typed_numeric_suffix(chars) {
+                            s.push_str(suffix);
+                            return Ok(Some(Token::Number(s, false)));
+                        }
+                    }
+
                     // If the dialect supports identifiers that start with a numeric prefix,
                     // we need to check if the value is in fact an identifier and must thus
                     // be tokenized as a word.
@@ -2012,6 +2022,40 @@ impl<'a> Tokenizer<'a> {
             value: s,
             tag: if value.is_empty() { None } else { Some(value) },
         }))
+    }
+
+    /// Consume a Spark-style type suffix (`Y`, `S`, `D`, `F`, `BD`, either
+    /// case) when it ends the token; `L` is left to the long-flag rule.
+    fn typed_numeric_suffix(&self, chars: &mut State) -> Option<&'static str> {
+        let ends_token = |c: Option<&char>| !c.is_some_and(|c| self.dialect.is_identifier_part(*c));
+        let first = *chars.peek()?;
+        let (suffix, len) = match first.to_ascii_uppercase() {
+            'Y' => ("Y", 1),
+            'S' => ("S", 1),
+            'D' => ("D", 1),
+            'F' => ("F", 1),
+            'B' => {
+                let mut ahead = chars.peekable.clone();
+                ahead.next();
+                if ahead.peek().is_some_and(|c| c.eq_ignore_ascii_case(&'D')) {
+                    ("BD", 2)
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        };
+        let mut ahead = chars.peekable.clone();
+        for _ in 0..len {
+            ahead.next();
+        }
+        if !ends_token(ahead.peek()) {
+            return None;
+        }
+        for _ in 0..len {
+            chars.next();
+        }
+        Some(suffix)
     }
 
     fn tokenizer_error<R>(
@@ -2674,6 +2718,38 @@ mod tests {
             })
             .collect();
         assert_eq!(strings, vec![r"%\_%", r"\%x", "a\nb"]);
+    }
+
+    #[test]
+    fn tokenize_typed_numeric_suffixes() {
+        use crate::dialect::SparkSqlDialect;
+        let sql = "SELECT 1Y, 2s, 3L, 4.5F, 6d, 7BD, 8bd, 9x, 10 S, 1e2D";
+        let dialect = SparkSqlDialect {};
+        let tokens = Tokenizer::new(&dialect, sql).tokenize().unwrap();
+        let numbers: Vec<Token> = tokens
+            .into_iter()
+            .filter(|t| matches!(t, Token::Number(..)))
+            .collect();
+        let expected = vec![
+            Token::Number(String::from("1Y"), false),
+            Token::Number(String::from("2S"), false),
+            Token::Number(String::from("3"), true),
+            Token::Number(String::from("4.5F"), false),
+            Token::Number(String::from("6D"), false),
+            Token::Number(String::from("7BD"), false),
+            Token::Number(String::from("8BD"), false),
+            // `9x` is a number then a word; `10 S` is a number then a word.
+            Token::Number(String::from("9"), false),
+            Token::Number(String::from("10"), false),
+            Token::Number(String::from("1e2D"), false),
+        ];
+        assert_eq!(numbers, expected);
+
+        // A dialect without the suffixes tokenizes `1S` as before: number, word.
+        let dialect = GenericDialect {};
+        let tokens = Tokenizer::new(&dialect, "SELECT 1S").tokenize().unwrap();
+        assert!(tokens.contains(&Token::Number(String::from("1"), false)));
+        assert!(tokens.contains(&Token::make_word("S", None)));
     }
 
     #[test]

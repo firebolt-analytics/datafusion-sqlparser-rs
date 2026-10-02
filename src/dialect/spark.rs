@@ -56,6 +56,11 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
+    /// `1Y`, `1S`, `1L`, `1.0F`, `1.0D`, `1.0BD`
+    fn supports_typed_numeric_literal_suffix(&self) -> bool {
+        true
+    }
+
     fn supports_filter_during_aggregation(&self) -> bool {
         true
     }

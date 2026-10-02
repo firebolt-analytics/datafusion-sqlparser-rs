@@ -497,6 +497,17 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if the dialect supports a type suffix on a numeric literal,
+    /// as Spark SQL does: `1Y` (tinyint), `1S` (smallint), `1L` (bigint),
+    /// `1.0F` (float), `1.0D` (double), `1.0BD` (decimal). The suffix is kept
+    /// on the number's text (upper-cased), except `L`, which keeps setting the
+    /// `long` flag of [`Token::Number`] as before.
+    ///
+    /// [`Token::Number`]: crate::tokenizer::Token::Number
+    fn supports_typed_numeric_literal_suffix(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports numbers containing underscores, e.g. `10_000_000`
     fn supports_numeric_literal_underscores(&self) -> bool {
         false
