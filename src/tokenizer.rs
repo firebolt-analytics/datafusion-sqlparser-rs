@@ -1459,12 +1459,15 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
 
-                    let long = if chars.peek() == Some(&'L') {
-                        chars.next();
-                        true
-                    } else {
-                        false
+                    // `L` marks a long; the dialects with typed suffixes take `l` too.
+                    let long = match chars.peek() {
+                        Some('L') => true,
+                        Some('l') if self.dialect.supports_typed_numeric_literal_suffix() => true,
+                        _ => false,
                     };
+                    if long {
+                        chars.next();
+                    }
                     Ok(Some(Token::Number(s, long)))
                 }
                 // punctuation
@@ -2723,7 +2726,7 @@ mod tests {
     #[test]
     fn tokenize_typed_numeric_suffixes() {
         use crate::dialect::SparkSqlDialect;
-        let sql = "SELECT 1Y, 2s, 3L, 4.5F, 6d, 7BD, 8bd, 9x, 10 S, 1e2D";
+        let sql = "SELECT 1Y, 2s, 3L, 4.5F, 6d, 7BD, 8bd, 9x, 10 S, 1e2D, 11l";
         let dialect = SparkSqlDialect {};
         let tokens = Tokenizer::new(&dialect, sql).tokenize().unwrap();
         let numbers: Vec<Token> = tokens
@@ -2742,6 +2745,7 @@ mod tests {
             Token::Number(String::from("9"), false),
             Token::Number(String::from("10"), false),
             Token::Number(String::from("1e2D"), false),
+            Token::Number(String::from("11"), true),
         ];
         assert_eq!(numbers, expected);
 
