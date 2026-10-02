@@ -650,6 +650,10 @@ impl<'a> Parser<'a> {
                     self.prev_token();
                     self.parse_query().map(Into::into)
                 }
+                Keyword::TABLE if self.dialect.supports_table_statement() => {
+                    self.prev_token();
+                    self.parse_query().map(Into::into)
+                }
                 Keyword::TRUNCATE => self.parse_truncate().map(Into::into),
                 Keyword::ATTACH => {
                     if dialect_of!(self is DuckDbDialect) {
@@ -14699,7 +14703,12 @@ impl<'a> Parser<'a> {
             }
             .into())
         } else {
-            let body = self.parse_query_body(self.dialect.prec_unknown())?;
+            let mut body = self.parse_query_body(self.dialect.prec_unknown())?;
+            if self.dialect.supports_values_alias() && matches!(*body, SetExpr::Values(_)) {
+                if let Some(alias) = self.maybe_parse_table_alias()? {
+                    body = Box::new(Self::values_with_alias(body, alias));
+                }
+            }
 
             let order_by = self.parse_optional_order_by()?;
 
@@ -15794,6 +15803,57 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(clauses)
+    }
+
+    /// `VALUES ... AS t(a, b)` as `SELECT * FROM (VALUES ...) AS t(a, b)`:
+    /// the alias has nowhere to go on a bare `SetExpr::Values`.
+    fn values_with_alias(values: Box<SetExpr>, alias: TableAlias) -> SetExpr {
+        let subquery = Box::new(Query {
+            with: None,
+            body: values,
+            order_by: None,
+            limit_clause: None,
+            fetch: None,
+            locks: vec![],
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+            pipe_operators: vec![],
+        });
+        SetExpr::Select(Box::new(Select {
+            select_token: AttachedToken::empty(),
+            optimizer_hints: vec![],
+            distinct: None,
+            select_modifiers: None,
+            top: None,
+            top_before_distinct: false,
+            projection: vec![SelectItem::Wildcard(WildcardAdditionalOptions::default())],
+            exclude: None,
+            into: None,
+            from: vec![TableWithJoins {
+                relation: TableFactor::Derived {
+                    lateral: false,
+                    subquery,
+                    alias: Some(alias),
+                    sample: None,
+                },
+                joins: vec![],
+            }],
+            lateral_views: vec![],
+            prewhere: None,
+            selection: None,
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
+            cluster_by: vec![],
+            distribute_by: vec![],
+            sort_by: vec![],
+            having: None,
+            named_window: vec![],
+            window_before_qualify: false,
+            qualify: None,
+            value_table_mode: None,
+            connect_by: vec![],
+            flavor: SelectFlavor::Standard,
+        }))
     }
 
     /// Parse `CREATE TABLE x AS TABLE y`

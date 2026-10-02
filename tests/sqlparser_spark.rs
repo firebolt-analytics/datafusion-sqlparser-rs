@@ -362,3 +362,36 @@ fn test_substring() {
 fn test_pipe_operator() {
     spark().verified_stmt("SELECT * FROM t |> WHERE x > 1 |> SELECT x AS y |> ORDER BY y");
 }
+
+// --------------------------------
+// TABLE t, VALUES ... AS t(a, b)
+// --------------------------------
+
+#[test]
+fn test_table_statement() {
+    let stmt = spark().verified_stmt("TABLE t");
+    match stmt {
+        Statement::Query(q) => match *q.body {
+            SetExpr::Table(t) => assert_eq!(t.table_name.as_deref(), Some("t")),
+            _ => panic!("Expected a TABLE body"),
+        },
+        _ => panic!("Expected Query"),
+    }
+    spark().verified_stmt("TABLE db.t");
+}
+
+#[test]
+fn test_values_with_alias() {
+    spark().one_statement_parses_to(
+        "VALUES (1, 2), (3, 4) AS t(a, b)",
+        "SELECT * FROM (VALUES (1, 2), (3, 4)) AS t (a, b)",
+    );
+    spark().one_statement_parses_to(
+        "CREATE TEMPORARY VIEW v AS VALUES (1, 2) AS t(a, b)",
+        "CREATE TEMPORARY VIEW v AS SELECT * FROM (VALUES (1, 2)) AS t (a, b)",
+    );
+    // Without an alias the body stays a plain VALUES, and a set operation
+    // after VALUES is not read as an alias.
+    spark().verified_stmt("VALUES (1, 2)");
+    spark().verified_stmt("VALUES (1) UNION ALL VALUES (2)");
+}

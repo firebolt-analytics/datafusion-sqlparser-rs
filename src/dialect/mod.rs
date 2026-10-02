@@ -508,6 +508,19 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if a statement may be a bare `TABLE t`, meaning
+    /// `SELECT * FROM t`, as in Spark SQL.
+    fn supports_table_statement(&self) -> bool {
+        false
+    }
+
+    /// Returns true if a `VALUES` query body may carry a table alias with a
+    /// column list, `VALUES (1, 2) AS t(a, b)`, as in Spark SQL. It parses to
+    /// `SELECT * FROM (VALUES (1, 2)) AS t(a, b)`.
+    fn supports_values_alias(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports numbers containing underscores, e.g. `10_000_000`
     fn supports_numeric_literal_underscores(&self) -> bool {
         false
