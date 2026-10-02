@@ -15859,8 +15859,19 @@ impl<'a> Parser<'a> {
     /// Parse `CREATE TABLE x AS TABLE y`
     pub fn parse_as_table(&mut self) -> Result<Table, ParserError> {
         let token1 = self.next_token();
-        let token2 = self.next_token();
-        let token3 = self.next_token();
+        // Only a `.` continues the name; anything else (ORDER BY, a pipe
+        // operator, the end of the statement) belongs to the caller.
+        let qualified = self.peek_token_ref().token == Token::Period;
+        let token2 = if qualified {
+            self.next_token()
+        } else {
+            TokenWithSpan::wrap(Token::EOF)
+        };
+        let token3 = if qualified {
+            self.next_token()
+        } else {
+            TokenWithSpan::wrap(Token::EOF)
+        };
 
         let table_name;
         let schema_name;

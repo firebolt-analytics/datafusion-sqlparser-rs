@@ -378,6 +378,9 @@ fn test_table_statement() {
         _ => panic!("Expected Query"),
     }
     spark().verified_stmt("TABLE db.t");
+    // The name is one or two parts; what follows belongs to the query.
+    spark().verified_stmt("TABLE t ORDER BY a DESC LIMIT 1");
+    spark().verified_stmt("TABLE db.t LIMIT 2");
 }
 
 #[test]
