@@ -70,6 +70,12 @@ impl Dialect for HiveDialect {
         kw == &Keyword::LIMIT || !RESERVED_FOR_TABLE_FACTOR.contains(kw)
     }
 
+    /// `'%\_%'` keeps its backslash, as Hive's `unescapeSQLString` does, so a
+    /// LIKE pattern survives the literal.
+    fn ignores_wildcard_escapes(&self) -> bool {
+        true
+    }
+
     fn supports_filter_during_aggregation(&self) -> bool {
         true
     }
