@@ -423,3 +423,39 @@ fn test_values_with_alias() {
     spark().verified_stmt("VALUES (1, 2)");
     spark().verified_stmt("VALUES (1) UNION ALL VALUES (2)");
 }
+
+#[test]
+fn test_describe_table_is_not_a_table_query() {
+    // `TABLE` after DESC/DESCRIBE names the table being described; it does
+    // not start a `TABLE t` query.
+    for sql in [
+        "DESCRIBE TABLE t",
+        "DESC TABLE db.t",
+        "DESCRIBE TABLE EXTENDED t",
+        "DESC TABLE FORMATTED db.t",
+    ] {
+        match spark().verified_stmt(sql) {
+            Statement::ExplainTable {
+                has_table_keyword, ..
+            } => assert!(has_table_keyword, "{sql}"),
+            other => panic!("Expected ExplainTable for {sql}, got {other:?}"),
+        }
+    }
+    match spark().verified_stmt("DESCRIBE TABLE EXTENDED db.t") {
+        Statement::ExplainTable {
+            hive_format,
+            table_name,
+            ..
+        } => {
+            assert_eq!(hive_format, Some(HiveDescribeFormat::Extended));
+            assert_eq!(table_name.to_string(), "db.t");
+        }
+        _ => unreachable!(),
+    }
+    spark().verified_stmt("DESCRIBE EXTENDED t");
+    // A table called `table` is still described by name.
+    spark().verified_stmt("DESCRIBE table");
+    spark().verified_stmt("DESCRIBE table.t");
+    // EXPLAIN is unaffected.
+    spark().one_statement_parses_to("EXPLAIN TABLE t", "EXPLAIN SELECT * FROM t");
+}

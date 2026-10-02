@@ -14589,7 +14589,22 @@ impl<'a> Parser<'a> {
             }
         }
 
-        match self.maybe_parse(|parser| parser.parse_statement())? {
+        // Spark's `DESC [TABLE] [EXTENDED | FORMATTED] name`: where `TABLE` can
+        // start a query, `DESC TABLE t` would otherwise describe the query `TABLE t`.
+        // `DESCRIBE table` and `DESCRIBE table.x` still name a table called `table`.
+        let describe_table = describe_alias != DescribeAlias::Explain
+            && self.dialect.supports_table_statement()
+            && self.peek_keyword(Keyword::TABLE)
+            && !matches!(
+                self.peek_nth_token_ref(1).token,
+                Token::EOF | Token::SemiColon | Token::Period
+            );
+        let statement = if describe_table {
+            None
+        } else {
+            self.maybe_parse(|parser| parser.parse_statement())?
+        };
+        match statement {
             Some(Statement::Explain { .. }) | Some(Statement::ExplainTable { .. }) => Err(
                 ParserError::ParserError("Explain must be root of the plan".to_string()),
             ),
@@ -14604,19 +14619,18 @@ impl<'a> Parser<'a> {
                 options,
             }),
             _ => {
-                let hive_format =
-                    match self.parse_one_of_keywords(&[Keyword::EXTENDED, Keyword::FORMATTED]) {
-                        Some(Keyword::EXTENDED) => Some(HiveDescribeFormat::Extended),
-                        Some(Keyword::FORMATTED) => Some(HiveDescribeFormat::Formatted),
-                        _ => None,
-                    };
+                let mut hive_format = self.parse_hive_describe_format();
 
-                let has_table_keyword = if self.dialect.describe_requires_table_keyword() {
-                    // only allow to use TABLE keyword for DESC|DESCRIBE statement
-                    self.parse_keyword(Keyword::TABLE)
-                } else {
-                    false
-                };
+                let has_table_keyword =
+                    if self.dialect.describe_requires_table_keyword() || describe_table {
+                        // only allow to use TABLE keyword for DESC|DESCRIBE statement
+                        self.parse_keyword(Keyword::TABLE)
+                    } else {
+                        false
+                    };
+                if has_table_keyword && hive_format.is_none() {
+                    hive_format = self.parse_hive_describe_format();
+                }
 
                 let table_name = self.parse_object_name(false)?;
                 Ok(Statement::ExplainTable {
@@ -14626,6 +14640,14 @@ impl<'a> Parser<'a> {
                     table_name,
                 })
             }
+        }
+    }
+
+    fn parse_hive_describe_format(&mut self) -> Option<HiveDescribeFormat> {
+        match self.parse_one_of_keywords(&[Keyword::EXTENDED, Keyword::FORMATTED]) {
+            Some(Keyword::EXTENDED) => Some(HiveDescribeFormat::Extended),
+            Some(Keyword::FORMATTED) => Some(HiveDescribeFormat::Formatted),
+            _ => None,
         }
     }
 
