@@ -362,3 +362,100 @@ fn test_substring() {
 fn test_pipe_operator() {
     spark().verified_stmt("SELECT * FROM t |> WHERE x > 1 |> SELECT x AS y |> ORDER BY y");
 }
+
+// --------------------------------
+// TABLE t, VALUES ... AS t(a, b)
+// --------------------------------
+
+#[test]
+fn test_table_statement() {
+    // `TABLE t` is read as `SELECT * FROM t`, wherever a query body can go.
+    spark().one_statement_parses_to("TABLE t", "SELECT * FROM t");
+    spark().one_statement_parses_to("TABLE db.t", "SELECT * FROM db.t");
+    spark().one_statement_parses_to("TABLE cat.db.t", "SELECT * FROM cat.db.t");
+    spark().one_statement_parses_to("TABLE `My T`", "SELECT * FROM `My T`");
+    spark().one_statement_parses_to(
+        "TABLE t ORDER BY a DESC LIMIT 1",
+        "SELECT * FROM t ORDER BY a DESC LIMIT 1",
+    );
+    spark().one_statement_parses_to(
+        "TABLE t1 UNION ALL TABLE t2",
+        "SELECT * FROM t1 UNION ALL SELECT * FROM t2",
+    );
+    spark().one_statement_parses_to(
+        "SELECT a FROM t1 EXCEPT TABLE t2",
+        "SELECT a FROM t1 EXCEPT SELECT * FROM t2",
+    );
+    spark().one_statement_parses_to(
+        "WITH c AS (TABLE t) TABLE c",
+        "WITH c AS (SELECT * FROM t) SELECT * FROM c",
+    );
+    spark().one_statement_parses_to(
+        "CREATE TABLE t2 AS TABLE db.t1",
+        "CREATE TABLE t2 AS SELECT * FROM db.t1",
+    );
+    spark().one_statement_parses_to("INSERT INTO t2 TABLE t1", "INSERT INTO t2 SELECT * FROM t1");
+    let stmt = spark().one_statement_parses_to("TABLE `My T`", "SELECT * FROM `My T`");
+    let Statement::Query(q) = stmt else {
+        panic!("Expected Query")
+    };
+    let SetExpr::Select(select) = *q.body else {
+        panic!("Expected a SELECT body")
+    };
+    let TableFactor::Table { name, .. } = &select.from[0].relation else {
+        panic!("Expected a table")
+    };
+    assert_eq!(name.0[0].as_ident().unwrap().quote_style, Some('`'));
+}
+
+#[test]
+fn test_values_with_alias() {
+    spark().one_statement_parses_to(
+        "VALUES (1, 2), (3, 4) AS t(a, b)",
+        "SELECT * FROM (VALUES (1, 2), (3, 4)) AS t (a, b)",
+    );
+    spark().one_statement_parses_to(
+        "CREATE TEMPORARY VIEW v AS VALUES (1, 2) AS t(a, b)",
+        "CREATE TEMPORARY VIEW v AS SELECT * FROM (VALUES (1, 2)) AS t (a, b)",
+    );
+    // Without an alias the body stays a plain VALUES, and a set operation
+    // after VALUES is not read as an alias.
+    spark().verified_stmt("VALUES (1, 2)");
+    spark().verified_stmt("VALUES (1) UNION ALL VALUES (2)");
+}
+
+#[test]
+fn test_describe_table_is_not_a_table_query() {
+    // `TABLE` after DESC/DESCRIBE names the table being described; it does
+    // not start a `TABLE t` query.
+    for sql in [
+        "DESCRIBE TABLE t",
+        "DESC TABLE db.t",
+        "DESCRIBE TABLE EXTENDED t",
+        "DESC TABLE FORMATTED db.t",
+    ] {
+        match spark().verified_stmt(sql) {
+            Statement::ExplainTable {
+                has_table_keyword, ..
+            } => assert!(has_table_keyword, "{sql}"),
+            other => panic!("Expected ExplainTable for {sql}, got {other:?}"),
+        }
+    }
+    match spark().verified_stmt("DESCRIBE TABLE EXTENDED db.t") {
+        Statement::ExplainTable {
+            hive_format,
+            table_name,
+            ..
+        } => {
+            assert_eq!(hive_format, Some(HiveDescribeFormat::Extended));
+            assert_eq!(table_name.to_string(), "db.t");
+        }
+        _ => unreachable!(),
+    }
+    spark().verified_stmt("DESCRIBE EXTENDED t");
+    // A table called `table` is still described by name.
+    spark().verified_stmt("DESCRIBE table");
+    spark().verified_stmt("DESCRIBE table.t");
+    // EXPLAIN is unaffected.
+    spark().one_statement_parses_to("EXPLAIN TABLE t", "EXPLAIN SELECT * FROM t");
+}
