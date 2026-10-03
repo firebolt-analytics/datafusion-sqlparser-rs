@@ -650,6 +650,10 @@ impl<'a> Parser<'a> {
                     self.prev_token();
                     self.parse_query().map(Into::into)
                 }
+                Keyword::TABLE if self.dialect.supports_table_statement() => {
+                    self.prev_token();
+                    self.parse_query().map(Into::into)
+                }
                 Keyword::TRUNCATE => self.parse_truncate().map(Into::into),
                 Keyword::ATTACH => {
                     if dialect_of!(self is DuckDbDialect) {
@@ -14585,7 +14589,22 @@ impl<'a> Parser<'a> {
             }
         }
 
-        match self.maybe_parse(|parser| parser.parse_statement())? {
+        // Spark's `DESC [TABLE] [EXTENDED | FORMATTED] name`: where `TABLE` can
+        // start a query, `DESC TABLE t` would otherwise describe the query `TABLE t`.
+        // `DESCRIBE table` and `DESCRIBE table.x` still name a table called `table`.
+        let describe_table = describe_alias != DescribeAlias::Explain
+            && self.dialect.supports_table_statement()
+            && self.peek_keyword(Keyword::TABLE)
+            && !matches!(
+                self.peek_nth_token_ref(1).token,
+                Token::EOF | Token::SemiColon | Token::Period
+            );
+        let statement = if describe_table {
+            None
+        } else {
+            self.maybe_parse(|parser| parser.parse_statement())?
+        };
+        match statement {
             Some(Statement::Explain { .. }) | Some(Statement::ExplainTable { .. }) => Err(
                 ParserError::ParserError("Explain must be root of the plan".to_string()),
             ),
@@ -14600,19 +14619,18 @@ impl<'a> Parser<'a> {
                 options,
             }),
             _ => {
-                let hive_format =
-                    match self.parse_one_of_keywords(&[Keyword::EXTENDED, Keyword::FORMATTED]) {
-                        Some(Keyword::EXTENDED) => Some(HiveDescribeFormat::Extended),
-                        Some(Keyword::FORMATTED) => Some(HiveDescribeFormat::Formatted),
-                        _ => None,
-                    };
+                let mut hive_format = self.parse_hive_describe_format();
 
-                let has_table_keyword = if self.dialect.describe_requires_table_keyword() {
-                    // only allow to use TABLE keyword for DESC|DESCRIBE statement
-                    self.parse_keyword(Keyword::TABLE)
-                } else {
-                    false
-                };
+                let has_table_keyword =
+                    if self.dialect.describe_requires_table_keyword() || describe_table {
+                        // only allow to use TABLE keyword for DESC|DESCRIBE statement
+                        self.parse_keyword(Keyword::TABLE)
+                    } else {
+                        false
+                    };
+                if has_table_keyword && hive_format.is_none() {
+                    hive_format = self.parse_hive_describe_format();
+                }
 
                 let table_name = self.parse_object_name(false)?;
                 Ok(Statement::ExplainTable {
@@ -14622,6 +14640,14 @@ impl<'a> Parser<'a> {
                     table_name,
                 })
             }
+        }
+    }
+
+    fn parse_hive_describe_format(&mut self) -> Option<HiveDescribeFormat> {
+        match self.parse_one_of_keywords(&[Keyword::EXTENDED, Keyword::FORMATTED]) {
+            Some(Keyword::EXTENDED) => Some(HiveDescribeFormat::Extended),
+            Some(Keyword::FORMATTED) => Some(HiveDescribeFormat::Formatted),
+            _ => None,
         }
     }
 
@@ -15209,12 +15235,40 @@ impl<'a> Parser<'a> {
             SetExpr::Query(subquery)
         } else if self.parse_keyword(Keyword::VALUES) {
             let is_mysql = dialect_of!(self is MySqlDialect);
-            SetExpr::Values(self.parse_values(is_mysql, false)?)
+            let values = SetExpr::Values(self.parse_values(is_mysql, false)?);
+            // The alias belongs to this operand, so read it before any set operator.
+            let alias = if self.dialect.supports_values_alias() {
+                self.maybe_parse_table_alias()?
+            } else {
+                None
+            };
+            match alias {
+                Some(alias) => Self::values_with_alias(Box::new(values), alias),
+                None => values,
+            }
         } else if self.parse_keyword(Keyword::VALUE) {
             let is_mysql = dialect_of!(self is MySqlDialect);
             SetExpr::Values(self.parse_values(is_mysql, true)?)
         } else if self.parse_keyword(Keyword::TABLE) {
-            SetExpr::Table(Box::new(self.parse_as_table()?))
+            if self.dialect.supports_table_statement() {
+                // `TABLE t` is `SELECT * FROM t`; keeping the ObjectName
+                // preserves quoting, which the string-only `Table` drops.
+                let name = self.parse_object_name(false)?;
+                Self::select_star_from(TableFactor::Table {
+                    name,
+                    alias: None,
+                    args: None,
+                    with_hints: vec![],
+                    version: None,
+                    partitions: vec![],
+                    with_ordinality: false,
+                    json_path: None,
+                    sample: None,
+                    index_hints: vec![],
+                })
+            } else {
+                SetExpr::Table(Box::new(self.parse_as_table()?))
+            }
         } else {
             return self.expected_ref(
                 "SELECT, VALUES, or a subquery in the query body",
@@ -15796,11 +15850,77 @@ impl<'a> Parser<'a> {
         Ok(clauses)
     }
 
+    /// `VALUES ... AS t(a, b)` as `SELECT * FROM (VALUES ...) AS t(a, b)`:
+    /// the alias has nowhere to go on a bare `SetExpr::Values`.
+    fn values_with_alias(values: Box<SetExpr>, alias: TableAlias) -> SetExpr {
+        let subquery = Box::new(Query {
+            with: None,
+            body: values,
+            order_by: None,
+            limit_clause: None,
+            fetch: None,
+            locks: vec![],
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+            pipe_operators: vec![],
+        });
+        Self::select_star_from(TableFactor::Derived {
+            lateral: false,
+            subquery,
+            alias: Some(alias),
+            sample: None,
+        })
+    }
+
+    fn select_star_from(relation: TableFactor) -> SetExpr {
+        SetExpr::Select(Box::new(Select {
+            select_token: AttachedToken::empty(),
+            optimizer_hints: vec![],
+            distinct: None,
+            select_modifiers: None,
+            top: None,
+            top_before_distinct: false,
+            projection: vec![SelectItem::Wildcard(WildcardAdditionalOptions::default())],
+            exclude: None,
+            into: None,
+            from: vec![TableWithJoins {
+                relation,
+                joins: vec![],
+            }],
+            lateral_views: vec![],
+            prewhere: None,
+            selection: None,
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
+            cluster_by: vec![],
+            distribute_by: vec![],
+            sort_by: vec![],
+            having: None,
+            named_window: vec![],
+            window_before_qualify: false,
+            qualify: None,
+            value_table_mode: None,
+            connect_by: vec![],
+            flavor: SelectFlavor::Standard,
+        }))
+    }
+
     /// Parse `CREATE TABLE x AS TABLE y`
     pub fn parse_as_table(&mut self) -> Result<Table, ParserError> {
         let token1 = self.next_token();
-        let token2 = self.next_token();
-        let token3 = self.next_token();
+        // Only a `.` continues the name; anything else (ORDER BY, a pipe
+        // operator, the end of the statement) belongs to the caller.
+        let qualified = self.peek_token_ref().token == Token::Period;
+        let token2 = if qualified {
+            self.next_token()
+        } else {
+            TokenWithSpan::wrap(Token::EOF)
+        };
+        let token3 = if qualified {
+            self.next_token()
+        } else {
+            TokenWithSpan::wrap(Token::EOF)
+        };
 
         let table_name;
         let schema_name;

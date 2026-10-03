@@ -52,6 +52,16 @@ impl Dialect for HiveDialect {
         true
     }
 
+    /// `TABLE t` as a statement
+    fn supports_table_statement(&self) -> bool {
+        true
+    }
+
+    /// `VALUES (1, 2) AS t(a, b)` as a query body
+    fn supports_values_alias(&self) -> bool {
+        true
+    }
+
     /// `1Y`, `1S`, `1L`, `1.0F`, `1.0D`, `1.0BD`
     fn supports_typed_numeric_literal_suffix(&self) -> bool {
         true
