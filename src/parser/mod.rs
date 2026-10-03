@@ -14725,12 +14725,7 @@ impl<'a> Parser<'a> {
             }
             .into())
         } else {
-            let mut body = self.parse_query_body(self.dialect.prec_unknown())?;
-            if self.dialect.supports_values_alias() && matches!(*body, SetExpr::Values(_)) {
-                if let Some(alias) = self.maybe_parse_table_alias()? {
-                    body = Box::new(Self::values_with_alias(body, alias));
-                }
-            }
+            let body = self.parse_query_body(self.dialect.prec_unknown())?;
 
             let order_by = self.parse_optional_order_by()?;
 
@@ -15240,7 +15235,17 @@ impl<'a> Parser<'a> {
             SetExpr::Query(subquery)
         } else if self.parse_keyword(Keyword::VALUES) {
             let is_mysql = dialect_of!(self is MySqlDialect);
-            SetExpr::Values(self.parse_values(is_mysql, false)?)
+            let values = SetExpr::Values(self.parse_values(is_mysql, false)?);
+            // The alias belongs to this operand, so read it before any set operator.
+            let alias = if self.dialect.supports_values_alias() {
+                self.maybe_parse_table_alias()?
+            } else {
+                None
+            };
+            match alias {
+                Some(alias) => Self::values_with_alias(Box::new(values), alias),
+                None => values,
+            }
         } else if self.parse_keyword(Keyword::VALUE) {
             let is_mysql = dialect_of!(self is MySqlDialect);
             SetExpr::Values(self.parse_values(is_mysql, true)?)

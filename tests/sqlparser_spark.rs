@@ -418,6 +418,32 @@ fn test_values_with_alias() {
         "CREATE TEMPORARY VIEW v AS VALUES (1, 2) AS t(a, b)",
         "CREATE TEMPORARY VIEW v AS SELECT * FROM (VALUES (1, 2)) AS t (a, b)",
     );
+    // The alias belongs to its own side of a set operation.
+    spark().one_statement_parses_to(
+        "VALUES (1, 2) AS t(a, b) UNION ALL VALUES (3, 4) AS u(a, b)",
+        "SELECT * FROM (VALUES (1, 2)) AS t (a, b) UNION ALL SELECT * FROM (VALUES (3, 4)) AS u (a, b)",
+    );
+    spark().one_statement_parses_to(
+        "SELECT 1 EXCEPT VALUES (1) AS t(a)",
+        "SELECT 1 EXCEPT SELECT * FROM (VALUES (1)) AS t (a)",
+    );
+    spark().one_statement_parses_to(
+        "VALUES (1) AS t(a) INTERSECT TABLE u",
+        "SELECT * FROM (VALUES (1)) AS t (a) INTERSECT SELECT * FROM u",
+    );
+    spark().one_statement_parses_to(
+        "VALUES (1) AS t(a) ORDER BY a LIMIT 1",
+        "SELECT * FROM (VALUES (1)) AS t (a) ORDER BY a LIMIT 1",
+    );
+    spark().one_statement_parses_to(
+        "WITH c AS (VALUES (1) AS t(a)) SELECT a FROM c",
+        "WITH c AS (SELECT * FROM (VALUES (1)) AS t (a)) SELECT a FROM c",
+    );
+    // FROM VALUES keeps its own table-factor form.
+    spark().one_statement_parses_to(
+        "SELECT * FROM VALUES (1, 2) AS t (a, b)",
+        "SELECT * FROM (VALUES (1, 2)) AS t (a, b)",
+    );
     // Without an alias the body stays a plain VALUES, and a set operation
     // after VALUES is not read as an alias.
     spark().verified_stmt("VALUES (1, 2)");
