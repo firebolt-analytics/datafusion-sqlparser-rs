@@ -5184,11 +5184,11 @@ impl fmt::Display for Statement {
             } => {
                 write!(f, "{describe_alias} ")?;
 
-                if let Some(format) = hive_format {
-                    write!(f, "{format} ")?;
-                }
                 if *has_table_keyword {
                     write!(f, "TABLE ")?;
+                }
+                if let Some(format) = hive_format {
+                    write!(f, "{format} ")?;
                 }
 
                 write!(f, "{table_name}")

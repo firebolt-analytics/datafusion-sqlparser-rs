@@ -4843,6 +4843,8 @@ fn parse_create_table_as() {
 
 #[test]
 fn parse_create_table_as_table() {
+    // Dialects with `supports_table_statement` read `TABLE t` as `SELECT * FROM t`.
+    let dialects = all_dialects_where(|d| !d.supports_table_statement());
     let sql1 = "CREATE TABLE new_table AS TABLE old_table";
 
     let expected_query1 = Box::new(Query {
@@ -4861,7 +4863,7 @@ fn parse_create_table_as_table() {
         pipe_operators: vec![],
     });
 
-    match verified_stmt(sql1) {
+    match dialects.verified_stmt(sql1) {
         Statement::CreateTable(CreateTable { query, name, .. }) => {
             assert_eq!(name, ObjectName::from(vec![Ident::new("new_table")]));
             assert_eq!(query.unwrap(), expected_query1);
@@ -4887,7 +4889,7 @@ fn parse_create_table_as_table() {
         pipe_operators: vec![],
     });
 
-    match verified_stmt(sql2) {
+    match dialects.verified_stmt(sql2) {
         Statement::CreateTable(CreateTable { query, name, .. }) => {
             assert_eq!(name, ObjectName::from(vec![Ident::new("new_table")]));
             assert_eq!(query.unwrap(), expected_query2);
