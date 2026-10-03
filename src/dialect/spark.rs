@@ -49,13 +49,18 @@ impl Dialect for SparkSqlDialect {
         matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
     }
 
-    /// See <https://spark.apache.org/docs/latest/sql-ref-functions-builtin-agg.html>
     /// `'%\_%'` keeps its backslash, as Hive's `unescapeSQLString` does, so a
     /// LIKE pattern survives the literal.
     fn ignores_wildcard_escapes(&self) -> bool {
         true
     }
 
+    /// `1Y`, `1S`, `1L`, `1.0F`, `1.0D`, `1.0BD`
+    fn supports_typed_numeric_literal_suffix(&self) -> bool {
+        true
+    }
+
+    /// See <https://spark.apache.org/docs/latest/sql-ref-functions-builtin-agg.html>
     fn supports_filter_during_aggregation(&self) -> bool {
         true
     }
