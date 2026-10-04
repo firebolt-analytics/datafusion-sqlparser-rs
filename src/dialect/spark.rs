@@ -19,9 +19,10 @@
 use alloc::boxed::Box;
 
 use crate::ast::{BinaryOperator, Expr};
-use crate::dialect::Dialect;
+use crate::dialect::{Dialect, Precedence};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
+use crate::tokenizer::Token;
 
 /// A [`Dialect`] for [Apache Spark SQL](https://spark.apache.org/docs/latest/sql-ref.html).
 ///
@@ -31,6 +32,21 @@ use crate::parser::{Parser, ParserError};
 pub struct SparkSqlDialect;
 
 impl Dialect for SparkSqlDialect {
+    /// `<<` and `>>`, binding tighter than `&` and looser than `+`, as Spark's
+    /// grammar orders them.
+    fn supports_bitwise_shift_operators(&self) -> bool {
+        true
+    }
+
+    fn get_next_precedence(&self, parser: &Parser) -> Option<Result<u8, ParserError>> {
+        match parser.peek_token_ref().token {
+            Token::ShiftLeft | Token::ShiftRight => {
+                Some(Ok(self.prec_value(Precedence::Ampersand) + 1))
+            }
+            _ => None,
+        }
+    }
+
     // See https://spark.apache.org/docs/latest/sql-ref-identifier.html
     fn is_delimited_identifier_start(&self, ch: char) -> bool {
         matches!(ch, '`')

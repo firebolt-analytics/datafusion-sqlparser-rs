@@ -485,3 +485,42 @@ fn test_describe_table_is_not_a_table_query() {
     // EXPLAIN is unaffected.
     spark().one_statement_parses_to("EXPLAIN TABLE t", "EXPLAIN SELECT * FROM t");
 }
+
+#[test]
+fn test_bitwise_shift_operators() {
+    spark().verified_stmt("SELECT 4 >> 1, 1 << 2");
+    // Tighter than `&`, looser than `+`.
+    match spark().verified_expr("1 & 3 << 1") {
+        Expr::BinaryOp {
+            op: BinaryOperator::BitwiseAnd,
+            right,
+            ..
+        } => assert!(matches!(
+            *right,
+            Expr::BinaryOp {
+                op: BinaryOperator::PGBitwiseShiftLeft,
+                ..
+            }
+        )),
+        other => panic!("Expected & over <<, got {other:?}"),
+    }
+    match spark().verified_expr("1 << 1 + 1") {
+        Expr::BinaryOp {
+            op: BinaryOperator::PGBitwiseShiftLeft,
+            right,
+            ..
+        } => assert!(matches!(
+            *right,
+            Expr::BinaryOp {
+                op: BinaryOperator::Plus,
+                ..
+            }
+        )),
+        other => panic!("Expected << over +, got {other:?}"),
+    }
+    spark().verified_stmt("SELECT (1 & 3) << 1");
+    match spark().verified_expr("a >> b") {
+        Expr::BinaryOp { op, .. } => assert_eq!(op, BinaryOperator::PGBitwiseShiftRight),
+        other => panic!("Expected a shift, got {other:?}"),
+    }
+}
