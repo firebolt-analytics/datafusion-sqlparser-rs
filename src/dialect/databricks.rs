@@ -15,9 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::dialect::Dialect;
+use crate::dialect::{Dialect, Precedence};
 use crate::keywords::Keyword;
-use crate::parser::Parser;
+use crate::parser::{Parser, ParserError};
+use crate::tokenizer::Token;
 
 /// A [`Dialect`] for [Databricks SQL](https://www.databricks.com/)
 ///
@@ -27,6 +28,21 @@ use crate::parser::Parser;
 pub struct DatabricksDialect;
 
 impl Dialect for DatabricksDialect {
+    /// `<<` and `>>`, binding tighter than `&` and looser than `+`, as Spark's
+    /// grammar orders them.
+    fn supports_bitwise_shift_operators(&self) -> bool {
+        true
+    }
+
+    fn get_next_precedence(&self, parser: &Parser) -> Option<Result<u8, ParserError>> {
+        match parser.peek_token_ref().token {
+            Token::ShiftLeft | Token::ShiftRight => {
+                Some(Ok(self.prec_value(Precedence::Ampersand) + 1))
+            }
+            _ => None,
+        }
+    }
+
     // see https://docs.databricks.com/en/sql/language-manual/sql-ref-identifiers.html
 
     fn is_delimited_identifier_start(&self, ch: char) -> bool {
