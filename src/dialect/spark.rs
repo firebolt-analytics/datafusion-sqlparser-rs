@@ -142,6 +142,11 @@ impl Dialect for SparkSqlDialect {
         false
     }
 
+    /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#interval-literal>
+    fn supports_interval_multi_units(&self) -> bool {
+        true
+    }
+
     fn supports_bang_not_operator(&self) -> bool {
         true
     }

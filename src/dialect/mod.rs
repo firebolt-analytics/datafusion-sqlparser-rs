@@ -1182,6 +1182,13 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if an interval literal may list several value / unit pairs,
+    /// as Spark's multi-units syntax does: `INTERVAL 10 YEAR 20 MONTH` is read
+    /// as `INTERVAL '10 YEAR 20 MONTH'`.
+    fn supports_interval_multi_units(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports `EXPLAIN` statements with utility options
     /// e.g. `EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) SELECT * FROM tbl;`
     fn supports_explain_with_utility_options(&self) -> bool {
