@@ -137,10 +137,6 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
-    /// The unit after an interval value is optional: Spark's multi-units syntax
-    /// lets the string carry its own units, `INTERVAL '1 YEAR 2 DAYS 3 HOURS'`.
-    /// An interval value is always a literal, never an expression.
-    ///
     /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#interval-literal>
     fn require_interval_qualifier(&self) -> bool {
         false
