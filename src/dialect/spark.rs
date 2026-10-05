@@ -137,8 +137,10 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
+    /// Interval values are literals, and a string may carry its own units:
+    /// `INTERVAL '2 months'`, `INTERVAL '-1 day 1 hour'`.
     fn require_interval_qualifier(&self) -> bool {
-        true
+        false
     }
 
     fn supports_bang_not_operator(&self) -> bool {

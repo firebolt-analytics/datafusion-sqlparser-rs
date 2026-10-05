@@ -109,8 +109,10 @@ impl Dialect for DatabricksDialect {
         true
     }
 
+    /// Interval values are literals, and a string may carry its own units:
+    /// `INTERVAL '2 months'`, `INTERVAL '-1 day 1 hour'`.
     fn require_interval_qualifier(&self) -> bool {
-        true
+        false
     }
 
     // See https://docs.databricks.com/en/sql/language-manual/functions/struct.html
