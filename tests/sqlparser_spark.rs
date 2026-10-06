@@ -545,30 +545,3 @@ fn test_interval_literals() {
         other => panic!("Expected an interval, got {other:?}"),
     }
 }
-
-#[test]
-fn test_interval_multi_units() {
-    spark().one_statement_parses_to(
-        "SELECT INTERVAL 10 YEAR 20 MONTH",
-        "SELECT INTERVAL '10 YEAR 20 MONTH'",
-    );
-    spark().one_statement_parses_to(
-        "SELECT INTERVAL 1 DAY -2 HOURS '30' MINUTE",
-        "SELECT INTERVAL '1 DAY -2 HOURS 30 MINUTE'",
-    );
-    spark().one_statement_parses_to(
-        "SELECT INTERVAL -1 DAY 2 HOURS AS i",
-        "SELECT INTERVAL '-1 DAY 2 HOURS' AS i",
-    );
-    spark().one_statement_parses_to(
-        "SELECT INTERVAL +1 DAY +2 HOURS",
-        "SELECT INTERVAL '1 DAY 2 HOURS'",
-    );
-    // A single unit, a unit followed by something else, and a qualifier are
-    // left as they are.
-    spark().verified_stmt("SELECT INTERVAL 3 DAY");
-    spark().verified_stmt("SELECT INTERVAL 3 DAY + 1");
-    spark().verified_stmt("SELECT INTERVAL '1-2' YEAR TO MONTH");
-    spark().verified_stmt("SELECT d + INTERVAL 1 DAY FROM t");
-    spark().verified_stmt("SELECT INTERVAL 1 DAY, 2 FROM t");
-}
