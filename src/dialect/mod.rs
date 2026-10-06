@@ -1183,9 +1183,7 @@ pub trait Dialect: Debug + Any {
     }
 
     /// Returns true if an interval literal may list several value / unit pairs,
-    /// `INTERVAL 10 YEAR 20 MONTH`, read as the string form
-    /// `INTERVAL '10 YEAR 20 MONTH'`. Not part of ANSI SQL, whose interval
-    /// literal takes one quoted value and a single qualifier.
+    /// e.g. `INTERVAL 10 YEAR 20 MONTH`.
     fn supports_interval_multi_units(&self) -> bool {
         false
     }
