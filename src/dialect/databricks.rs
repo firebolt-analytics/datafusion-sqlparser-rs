@@ -114,6 +114,11 @@ impl Dialect for DatabricksDialect {
         false
     }
 
+    /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#interval-literal>
+    fn supports_interval_multi_units(&self) -> bool {
+        true
+    }
+
     // See https://docs.databricks.com/en/sql/language-manual/functions/struct.html
     fn supports_struct_literal(&self) -> bool {
         true
