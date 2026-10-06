@@ -3444,8 +3444,8 @@ impl<'a> Parser<'a> {
             None
         };
 
-        // Spark's multi-units form, `INTERVAL 10 YEAR 20 MONTH`, means the same
-        // as the string form `INTERVAL '10 YEAR 20 MONTH'`, which is what it is
+        // The multi-units form, `INTERVAL 10 YEAR 20 MONTH`, means the same as
+        // the string form `INTERVAL '10 YEAR 20 MONTH'`, which is what it is
         // read as.
         if self.dialect.supports_interval_multi_units() {
             if let (Some(first_value), Some(first_unit)) =
@@ -3512,7 +3512,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The text of one multi-units interval value: a number or string literal,
-    /// optionally negated.
+    /// optionally signed.
     fn interval_unit_value(value: &Expr) -> Option<String> {
         match value {
             Expr::Value(v) => match &v.value {
@@ -3524,6 +3524,10 @@ impl<'a> Parser<'a> {
                 op: UnaryOperator::Minus,
                 expr,
             } => Self::interval_unit_value(expr).map(|v| format!("-{v}")),
+            Expr::UnaryOp {
+                op: UnaryOperator::Plus,
+                expr,
+            } => Self::interval_unit_value(expr),
             _ => None,
         }
     }

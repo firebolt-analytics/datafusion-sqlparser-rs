@@ -560,6 +560,10 @@ fn test_interval_multi_units() {
         "SELECT INTERVAL -1 DAY 2 HOURS AS i",
         "SELECT INTERVAL '-1 DAY 2 HOURS' AS i",
     );
+    spark().one_statement_parses_to(
+        "SELECT INTERVAL +1 DAY +2 HOURS",
+        "SELECT INTERVAL '1 DAY 2 HOURS'",
+    );
     // A single unit, a unit followed by something else, and a qualifier are
     // left as they are.
     spark().verified_stmt("SELECT INTERVAL 3 DAY");

@@ -1183,8 +1183,9 @@ pub trait Dialect: Debug + Any {
     }
 
     /// Returns true if an interval literal may list several value / unit pairs,
-    /// as Spark's multi-units syntax does: `INTERVAL 10 YEAR 20 MONTH` is read
-    /// as `INTERVAL '10 YEAR 20 MONTH'`.
+    /// `INTERVAL 10 YEAR 20 MONTH`, read as the string form
+    /// `INTERVAL '10 YEAR 20 MONTH'`. Not part of ANSI SQL, whose interval
+    /// literal takes one quoted value and a single qualifier.
     fn supports_interval_multi_units(&self) -> bool {
         false
     }
