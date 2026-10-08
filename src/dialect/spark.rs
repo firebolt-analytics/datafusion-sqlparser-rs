@@ -20,7 +20,7 @@ use alloc::boxed::Box;
 
 use crate::ast::{BinaryOperator, Expr};
 use crate::dialect::{Dialect, Precedence};
-use crate::keywords::Keyword;
+use crate::keywords::{self, Keyword};
 use crate::parser::{Parser, ParserError};
 use crate::tokenizer::Token;
 
@@ -137,9 +137,18 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
-    /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#interval-literal>
     fn require_interval_qualifier(&self) -> bool {
-        false
+        true
+    }
+
+    /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#interval-literal>
+    fn supports_interval_string_without_qualifier(&self) -> bool {
+        true
+    }
+
+    /// `SELECT interval FROM t` names a column.
+    fn is_reserved_for_identifier(&self, kw: Keyword) -> bool {
+        kw != Keyword::INTERVAL && keywords::RESERVED_FOR_IDENTIFIER.contains(&kw)
     }
 
     fn supports_bang_not_operator(&self) -> bool {
