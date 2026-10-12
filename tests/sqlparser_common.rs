@@ -20123,3 +20123,54 @@ fn parse_in_subquery_vs_list_dispatch() {
         assert_eq!(rendered.contains("InList"), !expects_subquery, "{sql}");
     }
 }
+
+#[test]
+fn parse_position_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = String::from("SELECT ") + &"POSITION(".repeat(24) + "1" + &")".repeat(24);
+
+    let (tx, rx) = mpsc::channel();
+    // 24 levels overflow the default 2 MB test-thread stack in debug builds.
+    thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let _ = tx.send(Parser::parse_sql(&GenericDialect {}, &sql).map(|_| ()));
+        })
+        .unwrap();
+
+    let result = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("parser should finish quickly, not loop exponentially");
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn parse_position_forms_with_nested_fallback() {
+    let dialects = all_dialects();
+    assert!(matches!(
+        dialects.verified_expr("POSITION('@' IN field)"),
+        Expr::Position { .. }
+    ));
+    // The inner call takes the `IN` form and the outer one falls back.
+    match dialects.verified_expr("POSITION(POSITION('@' IN field))") {
+        Expr::Function(Function {
+            args: FunctionArguments::List(FunctionArgumentList { args, .. }),
+            ..
+        }) => assert!(matches!(
+            &args[..],
+            [FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                Expr::Position { .. }
+            ))]
+        )),
+        other => panic!("outer POSITION should be an ordinary call, got {other:?}"),
+    }
+    // The outer call takes the `IN` form around an ordinary inner call.
+    assert!(matches!(
+        dialects.verified_expr("POSITION(POSITION(x) IN field)"),
+        Expr::Position { .. }
+    ));
+    dialects.verified_expr("POSITION(POSITION(POSITION(x)), POSITION(y))");
+}
