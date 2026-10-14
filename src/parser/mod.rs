@@ -276,7 +276,7 @@ impl ParserOptions {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ParserState {
     /// The default state of the parser.
     Normal,
@@ -355,9 +355,16 @@ pub struct Parser<'a> {
     /// `parse_table_factor`. See [`Parser::parse_table_factor`] for the 2^N
     /// pattern this guards.
     failed_derived_table_factor_positions: BTreeSet<usize>,
+    /// Cached failures of the speculative `POSITION(<expr> IN <expr>)` arm.
+    /// See [`Parser::parse_position_expr`] for the 2^N pattern this guards.
+    /// Keyed by state too, since `PRIOR` parses differently in `CONNECT BY`.
+    failed_position_syntax_positions: BTreeSet<(usize, ParserState)>,
     /// Cached failures from the speculative subquery arm of `parse_in`. See
     /// [`Parser::parse_in`] for the 2^N pattern this guards.
     failed_in_subquery_positions: BTreeSet<usize>,
+    /// Cached failures from the speculative arm of `try_parse_lambda`. See
+    /// [`Parser::try_parse_lambda`] for the 2^N pattern this guards.
+    failed_lambda_positions: BTreeSet<(usize, ParserState)>,
 }
 
 /// Copy marker for a [`ParserError`] cached by the `parse_prefix` failure
@@ -404,7 +411,9 @@ impl<'a> Parser<'a> {
             failed_prefix_positions: BTreeMap::new(),
             failed_reserved_word_prefix_positions: BTreeMap::new(),
             failed_derived_table_factor_positions: BTreeSet::new(),
+            failed_position_syntax_positions: BTreeSet::new(),
             failed_in_subquery_positions: BTreeSet::new(),
+            failed_lambda_positions: BTreeSet::new(),
         }
     }
 
@@ -473,7 +482,9 @@ impl<'a> Parser<'a> {
         self.failed_prefix_positions.clear();
         self.failed_reserved_word_prefix_positions.clear();
         self.failed_derived_table_factor_positions.clear();
+        self.failed_position_syntax_positions.clear();
         self.failed_in_subquery_positions.clear();
+        self.failed_lambda_positions.clear();
         self
     }
 
@@ -2413,7 +2424,14 @@ impl<'a> Parser<'a> {
         if !self.dialect.supports_lambda_functions() {
             return Ok(None);
         }
-        self.maybe_parse(|p| {
+        // Memoize failures to break the 2^N work on inputs like `(x)->(x)->...` with a body
+        // that fails to parse: the fallback parses `(x)` as a nested expression and `->` as a
+        // binary operator, whose right side re-attempts the identical speculative parse.
+        let lambda_pos = (self.index, self.state);
+        if self.failed_lambda_positions.contains(&lambda_pos) {
+            return Ok(None);
+        }
+        let lambda = self.maybe_parse(|p| {
             let params = p.parse_comma_separated(|p| p.parse_lambda_function_parameter())?;
             p.expect_token(&Token::RParen)?;
             p.expect_token(&Token::Arrow)?;
@@ -2423,7 +2441,11 @@ impl<'a> Parser<'a> {
                 body: Box::new(expr),
                 syntax: LambdaSyntax::Arrow,
             }))
-        })
+        })?;
+        if lambda.is_none() {
+            self.failed_lambda_positions.insert(lambda_pos);
+        }
+        Ok(lambda)
     }
 
     /// Parses a lambda expression following the `LAMBDA` keyword syntax.
@@ -3022,6 +3044,12 @@ impl<'a> Parser<'a> {
     /// Parse a `POSITION` expression.
     pub fn parse_position_expr(&mut self, ident: Ident) -> Result<Expr, ParserError> {
         let between_prec = self.dialect.prec_value(Precedence::Between);
+        // Memoize a failed `IN` form: the function-call fallback re-parses the
+        // same argument, so nested `POSITION(POSITION(...))` would take 2^N.
+        let memo_key = (self.index, self.state);
+        if self.failed_position_syntax_positions.contains(&memo_key) {
+            return self.parse_function(ObjectName::from(vec![ident]));
+        }
         let position_expr = self.maybe_parse(|p| {
             // PARSE SELECT POSITION('@' in field)
             p.expect_token(&Token::LParen)?;
@@ -3040,7 +3068,10 @@ impl<'a> Parser<'a> {
             Some(expr) => Ok(expr),
             // Snowflake supports `position` as an ordinary function call
             // without the special `IN` syntax.
-            None => self.parse_function(ObjectName::from(vec![ident])),
+            None => {
+                self.failed_position_syntax_positions.insert(memo_key);
+                self.parse_function(ObjectName::from(vec![ident]))
+            }
         }
     }
 
