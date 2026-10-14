@@ -20095,6 +20095,62 @@ fn parse_in_chain_no_exponential_blowup() {
         .expect("parser should reject this quickly, not loop exponentially");
 }
 
+/// A chain of `(x)->` whose last body fails to parse used to cost 2^depth: each lambda
+/// attempt fails, and its `(x) -> ...` binary-operator fallback re-attempts the next one.
+#[test]
+fn parse_lambda_arrow_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = format!("SELECT {}1 +", "(x)->".repeat(40));
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        for dialect in all_dialects_where(|d| d.supports_lambda_functions()).dialects {
+            let _ = Parser::new(&*dialect)
+                .with_recursion_limit(256)
+                .try_with_sql(&sql)
+                .and_then(|mut p| p.parse_statements());
+        }
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("parser should reject this quickly, not loop exponentially");
+}
+
+/// A cached lambda failure must fall back exactly as a fresh one does.
+#[test]
+fn parse_lambda_vs_arrow_operator_dispatch() {
+    let dialects = all_dialects_where(|d| d.supports_lambda_functions());
+    let cases = [
+        ("SELECT (x) -> (y) -> x + y", 2, 0),
+        ("SELECT (x) -> x, (1) -> 'k'", 1, 1),
+        ("SELECT (1) -> (x) -> x", 1, 1),
+        ("SELECT ((x) -> 1) -> 'k'", 1, 1),
+    ];
+    for (sql, lambdas, arrows) in cases {
+        for dialect in &dialects.dialects {
+            let ast = Parser::new(&**dialect)
+                .try_with_sql(sql)
+                .and_then(|mut p| p.parse_statements())
+                .unwrap_or_else(|e| panic!("{sql} should parse under {dialect:?}, got {e}"));
+            let rendered = format!("{ast:?}");
+            assert_eq!(
+                rendered.matches("Lambda(").count(),
+                lambdas,
+                "{sql} under {dialect:?}"
+            );
+            assert_eq!(
+                rendered.matches("op: Arrow").count(),
+                arrows,
+                "{sql} under {dialect:?}"
+            );
+        }
+    }
+}
+
 /// Asserting only that these parse would miss a silent `InSubquery` -> `InList` change,
 /// since both succeed.
 #[test]
