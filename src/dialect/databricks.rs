@@ -109,9 +109,8 @@ impl Dialect for DatabricksDialect {
         true
     }
 
-    /// See <https://docs.databricks.com/aws/en/sql/language-manual/data-types/interval-type>
     fn require_interval_qualifier(&self) -> bool {
-        false
+        true
     }
 
     // See https://docs.databricks.com/en/sql/language-manual/functions/struct.html
