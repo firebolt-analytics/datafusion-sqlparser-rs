@@ -20095,6 +20095,62 @@ fn parse_in_chain_no_exponential_blowup() {
         .expect("parser should reject this quickly, not loop exponentially");
 }
 
+/// A chain of `(x)->` whose last body fails to parse used to cost 2^depth: each lambda
+/// attempt fails, and its `(x) -> ...` binary-operator fallback re-attempts the next one.
+#[test]
+fn parse_lambda_arrow_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = format!("SELECT {}1 +", "(x)->".repeat(40));
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        for dialect in all_dialects_where(|d| d.supports_lambda_functions()).dialects {
+            let _ = Parser::new(&*dialect)
+                .with_recursion_limit(256)
+                .try_with_sql(&sql)
+                .and_then(|mut p| p.parse_statements());
+        }
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(5))
+        .expect("parser should reject this quickly, not loop exponentially");
+}
+
+/// A cached lambda failure must fall back exactly as a fresh one does.
+#[test]
+fn parse_lambda_vs_arrow_operator_dispatch() {
+    let dialects = all_dialects_where(|d| d.supports_lambda_functions());
+    let cases = [
+        ("SELECT (x) -> (y) -> x + y", 2, 0),
+        ("SELECT (x) -> x, (1) -> 'k'", 1, 1),
+        ("SELECT (1) -> (x) -> x", 1, 1),
+        ("SELECT ((x) -> 1) -> 'k'", 1, 1),
+    ];
+    for (sql, lambdas, arrows) in cases {
+        for dialect in &dialects.dialects {
+            let ast = Parser::new(&**dialect)
+                .try_with_sql(sql)
+                .and_then(|mut p| p.parse_statements())
+                .unwrap_or_else(|e| panic!("{sql} should parse under {dialect:?}, got {e}"));
+            let rendered = format!("{ast:?}");
+            assert_eq!(
+                rendered.matches("Lambda(").count(),
+                lambdas,
+                "{sql} under {dialect:?}"
+            );
+            assert_eq!(
+                rendered.matches("op: Arrow").count(),
+                arrows,
+                "{sql} under {dialect:?}"
+            );
+        }
+    }
+}
+
 /// Asserting only that these parse would miss a silent `InSubquery` -> `InList` change,
 /// since both succeed.
 #[test]
@@ -20122,4 +20178,55 @@ fn parse_in_subquery_vs_list_dispatch() {
         assert_eq!(rendered.contains("InSubquery"), expects_subquery, "{sql}");
         assert_eq!(rendered.contains("InList"), !expects_subquery, "{sql}");
     }
+}
+
+#[test]
+fn parse_position_chain_no_exponential_blowup() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let sql = String::from("SELECT ") + &"POSITION(".repeat(24) + "1" + &")".repeat(24);
+
+    let (tx, rx) = mpsc::channel();
+    // 24 levels overflow the default 2 MB test-thread stack in debug builds.
+    thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let _ = tx.send(Parser::parse_sql(&GenericDialect {}, &sql).map(|_| ()));
+        })
+        .unwrap();
+
+    let result = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("parser should finish quickly, not loop exponentially");
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn parse_position_forms_with_nested_fallback() {
+    let dialects = all_dialects();
+    assert!(matches!(
+        dialects.verified_expr("POSITION('@' IN field)"),
+        Expr::Position { .. }
+    ));
+    // The inner call takes the `IN` form and the outer one falls back.
+    match dialects.verified_expr("POSITION(POSITION('@' IN field))") {
+        Expr::Function(Function {
+            args: FunctionArguments::List(FunctionArgumentList { args, .. }),
+            ..
+        }) => assert!(matches!(
+            &args[..],
+            [FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                Expr::Position { .. }
+            ))]
+        )),
+        other => panic!("outer POSITION should be an ordinary call, got {other:?}"),
+    }
+    // The outer call takes the `IN` form around an ordinary inner call.
+    assert!(matches!(
+        dialects.verified_expr("POSITION(POSITION(x) IN field)"),
+        Expr::Position { .. }
+    ));
+    dialects.verified_expr("POSITION(POSITION(POSITION(x)), POSITION(y))");
 }
