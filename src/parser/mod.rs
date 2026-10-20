@@ -362,6 +362,9 @@ pub struct Parser<'a> {
     /// Cached failures from the speculative subquery arm of `parse_in`. See
     /// [`Parser::parse_in`] for the 2^N pattern this guards.
     failed_in_subquery_positions: BTreeSet<usize>,
+    /// Cached failures of the speculative `(<params>) -> <body>` arm. See
+    /// [`Parser::try_parse_lambda`] for the 2^N pattern this guards.
+    failed_lambda_positions: BTreeSet<(usize, ParserState)>,
 }
 
 /// Copy marker for a [`ParserError`] cached by the `parse_prefix` failure
@@ -410,6 +413,7 @@ impl<'a> Parser<'a> {
             failed_derived_table_factor_positions: BTreeSet::new(),
             failed_position_syntax_positions: BTreeSet::new(),
             failed_in_subquery_positions: BTreeSet::new(),
+            failed_lambda_positions: BTreeSet::new(),
         }
     }
 
@@ -480,6 +484,7 @@ impl<'a> Parser<'a> {
         self.failed_derived_table_factor_positions.clear();
         self.failed_position_syntax_positions.clear();
         self.failed_in_subquery_positions.clear();
+        self.failed_lambda_positions.clear();
         self
     }
 
@@ -2427,7 +2432,13 @@ impl<'a> Parser<'a> {
         if !self.dialect.supports_lambda_functions() {
             return Ok(None);
         }
-        self.maybe_parse(|p| {
+        // Memoize a failed lambda: the fallback parses `(x)` as a nested expression and `->` as
+        // a binary operator, so a chain `(x)->(x)->...` would retry each lambda 2^N times.
+        let memo_key = (self.index, self.state);
+        if self.failed_lambda_positions.contains(&memo_key) {
+            return Ok(None);
+        }
+        let lambda = self.maybe_parse(|p| {
             let params = p.parse_comma_separated(|p| p.parse_lambda_function_parameter())?;
             p.expect_token(&Token::RParen)?;
             p.expect_token(&Token::Arrow)?;
@@ -2437,7 +2448,11 @@ impl<'a> Parser<'a> {
                 body: Box::new(expr),
                 syntax: LambdaSyntax::Arrow,
             }))
-        })
+        })?;
+        if lambda.is_none() {
+            self.failed_lambda_positions.insert(memo_key);
+        }
+        Ok(lambda)
     }
 
     /// Parses a lambda expression following the `LAMBDA` keyword syntax.
