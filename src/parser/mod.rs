@@ -362,7 +362,7 @@ pub struct Parser<'a> {
     /// Cached failures from the speculative subquery arm of `parse_in`. See
     /// [`Parser::parse_in`] for the 2^N pattern this guards.
     failed_in_subquery_positions: BTreeSet<usize>,
-    /// Cached failures from the speculative arm of `try_parse_lambda`. See
+    /// Cached failures of the speculative `(<params>) -> <body>` arm. See
     /// [`Parser::try_parse_lambda`] for the 2^N pattern this guards.
     failed_lambda_positions: BTreeSet<(usize, ParserState)>,
 }
@@ -2432,11 +2432,10 @@ impl<'a> Parser<'a> {
         if !self.dialect.supports_lambda_functions() {
             return Ok(None);
         }
-        // Memoize failures to break the 2^N work on inputs like `(x)->(x)->...` with a body
-        // that fails to parse: the fallback parses `(x)` as a nested expression and `->` as a
-        // binary operator, whose right side re-attempts the identical speculative parse.
-        let lambda_pos = (self.index, self.state);
-        if self.failed_lambda_positions.contains(&lambda_pos) {
+        // Memoize a failed lambda: the fallback parses `(x)` as a nested expression and `->` as
+        // a binary operator, so a chain `(x)->(x)->...` would retry each lambda 2^N times.
+        let memo_key = (self.index, self.state);
+        if self.failed_lambda_positions.contains(&memo_key) {
             return Ok(None);
         }
         let lambda = self.maybe_parse(|p| {
@@ -2451,7 +2450,7 @@ impl<'a> Parser<'a> {
             }))
         })?;
         if lambda.is_none() {
-            self.failed_lambda_positions.insert(lambda_pos);
+            self.failed_lambda_positions.insert(memo_key);
         }
         Ok(lambda)
     }
