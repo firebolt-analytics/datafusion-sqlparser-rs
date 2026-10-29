@@ -592,19 +592,34 @@ fn test_interval_preserves_column_query() {
 
 #[test]
 fn test_exists_function() {
-    // `exists(arr, lambda)` is a function; `EXISTS (SELECT ...)` stays a subquery test.
+    // `exists(arr, lambda)` is a function; `EXISTS (<query>)` stays a subquery test.
     match spark().verified_expr("exists(array(1, 2), x -> x > 1)") {
         Expr::Function(f) => assert_eq!(f.name.to_string(), "exists"),
         other => panic!("expected a function, got {other:?}"),
     }
-    assert!(matches!(
-        spark().verified_expr("EXISTS (SELECT 1)"),
-        Expr::Exists { negated: false, .. }
-    ));
-    assert!(matches!(
-        spark().verified_expr("EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)"),
-        Expr::Exists { negated: false, .. }
-    ));
+    // `TABLE t` prints as `SELECT * FROM t`.
+    for (subquery, canonical) in [
+        ("EXISTS (SELECT 1)", "EXISTS (SELECT 1)"),
+        (
+            "EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)",
+            "EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)",
+        ),
+        ("EXISTS (TABLE t)", "EXISTS (SELECT * FROM t)"),
+        ("EXISTS (VALUES (1))", "EXISTS (VALUES (1))"),
+    ] {
+        assert!(
+            matches!(
+                spark().expr_parses_to(subquery, canonical),
+                Expr::Exists { negated: false, .. }
+            ),
+            "{subquery}"
+        );
+    }
+    // A pipe query after the parenthesis.
+    spark().one_statement_parses_to(
+        "SELECT * FROM t WHERE EXISTS (TABLE u |> WHERE u.a = t.a)",
+        "SELECT * FROM t WHERE EXISTS (SELECT * FROM u |> WHERE u.a = t.a)",
+    );
 }
 
 #[test]
