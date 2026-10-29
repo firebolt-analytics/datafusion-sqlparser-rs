@@ -1592,9 +1592,8 @@ impl<'a> Parser<'a> {
             Keyword::TRY_CAST => Ok(Some(self.parse_cast_expr(CastKind::TryCast)?)),
             Keyword::SAFE_CAST => Ok(Some(self.parse_cast_expr(CastKind::SafeCast)?)),
             Keyword::EXISTS
-            // Databricks and Spark have a function named `exists`; a query
-            // after the parenthesis still makes it the EXISTS predicate.
-            if !dialect_of!(self is DatabricksDialect | SparkSqlDialect)
+            // A query after the parenthesis is still the EXISTS predicate.
+            if !self.dialect.supports_exists_function()
                 || matches!(
                         self.peek_nth_token_ref(1).token,
                         Token::Word(Word {
