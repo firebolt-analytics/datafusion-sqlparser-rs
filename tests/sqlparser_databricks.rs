@@ -814,3 +814,48 @@ fn test_interval_preserves_column_query() {
         )))]
     );
 }
+
+#[test]
+fn test_databricks_div() {
+    databricks().one_statement_parses_to("SELECT 7 div 2", "SELECT 7 DIV 2");
+    assert_eq!(
+        databricks().verified_expr("7 DIV 2 + 1"),
+        Expr::BinaryOp {
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::value(number("7"))),
+                op: BinaryOperator::MyIntegerDivide,
+                right: Box::new(Expr::value(number("2"))),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expr::value(number("1"))),
+        }
+    );
+}
+
+#[test]
+fn test_databricks_create_table_using_and_long() {
+    databricks().verified_stmt("CREATE TABLE t (i INT) USING DELTA");
+    databricks().one_statement_parses_to(
+        "CREATE TABLE t (id LONG) USING parquet",
+        "CREATE TABLE t (id BIGINT) USING parquet",
+    );
+}
+
+#[test]
+fn test_databricks_long_literal() {
+    // `1L` is a BIGINT literal, not an identifier that starts with a digit.
+    assert_eq!(
+        databricks()
+            .verified_only_select_with_canonical("SELECT 1L, 2l", "SELECT 1L, 2L")
+            .projection,
+        vec![
+            SelectItem::UnnamedExpr(Expr::value(Value::Number("1".parse().unwrap(), true))),
+            SelectItem::UnnamedExpr(Expr::value(Value::Number("2".parse().unwrap(), true))),
+        ]
+    );
+    // A longer word is still an identifier.
+    assert_eq!(
+        databricks().verified_only_select("SELECT 1La").projection,
+        vec![SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("1La")))]
+    );
+}

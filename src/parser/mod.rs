@@ -1592,8 +1592,8 @@ impl<'a> Parser<'a> {
             Keyword::TRY_CAST => Ok(Some(self.parse_cast_expr(CastKind::TryCast)?)),
             Keyword::SAFE_CAST => Ok(Some(self.parse_cast_expr(CastKind::SafeCast)?)),
             Keyword::EXISTS
-            // Support parsing Databricks has a function named `exists`.
-            if !dialect_of!(self is DatabricksDialect)
+            // Databricks and Spark have a function named `exists`.
+            if !dialect_of!(self is DatabricksDialect | SparkSqlDialect)
                 || matches!(
                         self.peek_nth_token_ref(1).token,
                         Token::Word(Word {

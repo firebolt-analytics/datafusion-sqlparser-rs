@@ -589,3 +589,33 @@ fn test_interval_preserves_column_query() {
         )))]
     );
 }
+
+#[test]
+fn test_exists_function() {
+    // `exists(arr, lambda)` is a function; `EXISTS (SELECT ...)` stays a subquery test.
+    match spark().verified_expr("exists(array(1, 2), x -> x > 1)") {
+        Expr::Function(f) => assert_eq!(f.name.to_string(), "exists"),
+        other => panic!("expected a function, got {other:?}"),
+    }
+    assert!(matches!(
+        spark().verified_expr("EXISTS (SELECT 1)"),
+        Expr::Exists { negated: false, .. }
+    ));
+    assert!(matches!(
+        spark().verified_expr("EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)"),
+        Expr::Exists { negated: false, .. }
+    ));
+}
+
+#[test]
+fn test_string_literal_backslash_escapes() {
+    let select = spark()
+        .verified_only_select_with_canonical(r"SELECT 'it\'s', 'a\tb'", "SELECT 'it''s', 'a\tb'");
+    assert_eq!(
+        select.projection,
+        vec![
+            SelectItem::UnnamedExpr(Expr::value(Value::SingleQuotedString("it's".to_string()))),
+            SelectItem::UnnamedExpr(Expr::value(Value::SingleQuotedString("a\tb".to_string()))),
+        ]
+    );
+}

@@ -1436,6 +1436,9 @@ impl<'a> Tokenizer<'a> {
                             s.push_str(suffix);
                             return Ok(Some(Token::Number(s, false)));
                         }
+                        if self.long_numeric_suffix(chars) {
+                            return Ok(Some(Token::Number(s, true)));
+                        }
                     }
 
                     // If the dialect supports identifiers that start with a numeric prefix,
@@ -2029,6 +2032,23 @@ impl<'a> Tokenizer<'a> {
 
     /// Consume a Spark-style type suffix (`Y`, `S`, `D`, `F`, `BD`, either
     /// case) when it ends the token; `L` is left to the long-flag rule.
+    /// Consumes an `L` / `l` suffix that ends the token, as in `1L`.
+    fn long_numeric_suffix(&self, chars: &mut State) -> bool {
+        if !chars.peek().is_some_and(|c| c.eq_ignore_ascii_case(&'L')) {
+            return false;
+        }
+        let mut ahead = chars.peekable.clone();
+        ahead.next();
+        if ahead
+            .peek()
+            .is_some_and(|c| self.dialect.is_identifier_part(*c))
+        {
+            return false;
+        }
+        chars.next();
+        true
+    }
+
     fn typed_numeric_suffix(&self, chars: &mut State) -> Option<&'static str> {
         let ends_token = |c: Option<&char>| !c.is_some_and(|c| self.dialect.is_identifier_part(*c));
         let first = *chars.peek()?;
