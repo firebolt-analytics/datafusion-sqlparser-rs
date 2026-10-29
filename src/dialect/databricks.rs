@@ -68,6 +68,13 @@ impl Dialect for DatabricksDialect {
         true
     }
 
+    /// `1L` is a `BIGINT` literal.
+    ///
+    /// See <https://docs.databricks.com/aws/en/sql/language-manual/data-types/bigint-type>
+    fn supports_long_suffix_before_numeric_prefix(&self) -> bool {
+        true
+    }
+
     /// `'%\_%'` keeps its backslash, as Hive's `unescapeSQLString` does, so a
     /// LIKE pattern survives the literal.
     fn ignores_wildcard_escapes(&self) -> bool {

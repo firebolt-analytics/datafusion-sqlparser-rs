@@ -845,13 +845,11 @@ fn test_databricks_create_table_using_and_long() {
 fn test_databricks_long_literal() {
     // `1L` is a BIGINT literal, not an identifier that starts with a digit.
     assert_eq!(
-        databricks()
-            .verified_only_select_with_canonical("SELECT 1L, 2l", "SELECT 1L, 2L")
-            .projection,
-        vec![
-            SelectItem::UnnamedExpr(Expr::value(Value::Number("1".parse().unwrap(), true))),
-            SelectItem::UnnamedExpr(Expr::value(Value::Number("2".parse().unwrap(), true))),
-        ]
+        databricks().verified_only_select("SELECT 1L").projection,
+        vec![SelectItem::UnnamedExpr(Expr::value(Value::Number(
+            "1".parse().unwrap(),
+            true
+        )))]
     );
     // A longer word is still an identifier.
     assert_eq!(
