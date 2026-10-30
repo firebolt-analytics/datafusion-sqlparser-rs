@@ -620,6 +620,8 @@ fn test_exists_function() {
         "SELECT * FROM t WHERE EXISTS (TABLE u |> WHERE u.a = t.a)",
         "SELECT * FROM t WHERE EXISTS (SELECT * FROM u |> WHERE u.a = t.a)",
     );
+    spark().verified_stmt("SELECT exists(arr, x -> x > 2), NOT exists(arr, x -> x < 0) FROM t");
+    spark().verified_stmt("SELECT * FROM t WHERE EXISTS (SELECT 1) AND NOT EXISTS ((SELECT 2))");
 }
 
 #[test]
