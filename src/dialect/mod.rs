@@ -497,6 +497,13 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if an `L` ending a number, as in `1L`, makes it a long
+    /// literal even when [`Dialect::supports_numeric_prefix`] would otherwise
+    /// read `1L` as an identifier. `1La` is still an identifier.
+    fn supports_long_suffix_before_numeric_prefix(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports a type suffix on a numeric literal,
     /// as Spark SQL does: `1Y` (tinyint), `1S` (smallint), `1L` (bigint),
     /// `1.0F` (float), `1.0D` (double), `1.0BD` (decimal). The suffix is kept
@@ -560,6 +567,13 @@ pub trait Dialect: Debug + Any {
     /// SELECT transform(array(1, 2, 3), x -> x + 1); -- returns [2,3,4]
     /// ```
     fn supports_lambda_functions(&self) -> bool {
+        false
+    }
+
+    /// Returns true if `exists(...)` is a call to a function named `exists`,
+    /// as in `exists(array(1, 2), x -> x > 1)`, unless a query follows the
+    /// parenthesis, as in `EXISTS (SELECT 1)`.
+    fn supports_exists_function(&self) -> bool {
         false
     }
 

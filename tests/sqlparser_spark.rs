@@ -589,3 +589,50 @@ fn test_interval_preserves_column_query() {
         )))]
     );
 }
+
+#[test]
+fn test_exists_function() {
+    // `exists(arr, lambda)` is a function; `EXISTS (<query>)` stays a subquery test.
+    match spark().verified_expr("exists(array(1, 2), x -> x > 1)") {
+        Expr::Function(f) => assert_eq!(f.name.to_string(), "exists"),
+        other => panic!("expected a function, got {other:?}"),
+    }
+    // `TABLE t` prints as `SELECT * FROM t`.
+    for (subquery, canonical) in [
+        ("EXISTS (SELECT 1)", "EXISTS (SELECT 1)"),
+        (
+            "EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)",
+            "EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)",
+        ),
+        ("EXISTS (TABLE t)", "EXISTS (SELECT * FROM t)"),
+        ("EXISTS (VALUES (1))", "EXISTS (VALUES (1))"),
+    ] {
+        assert!(
+            matches!(
+                spark().expr_parses_to(subquery, canonical),
+                Expr::Exists { negated: false, .. }
+            ),
+            "{subquery}"
+        );
+    }
+    // A pipe query after the parenthesis.
+    spark().one_statement_parses_to(
+        "SELECT * FROM t WHERE EXISTS (TABLE u |> WHERE u.a = t.a)",
+        "SELECT * FROM t WHERE EXISTS (SELECT * FROM u |> WHERE u.a = t.a)",
+    );
+    spark().verified_stmt("SELECT exists(arr, x -> x > 2), NOT exists(arr, x -> x < 0) FROM t");
+    spark().verified_stmt("SELECT * FROM t WHERE EXISTS (SELECT 1) AND NOT EXISTS ((SELECT 2))");
+}
+
+#[test]
+fn test_string_literal_backslash_escapes() {
+    let select = spark()
+        .verified_only_select_with_canonical(r"SELECT 'it\'s', 'a\tb'", "SELECT 'it''s', 'a\tb'");
+    assert_eq!(
+        select.projection,
+        vec![
+            SelectItem::UnnamedExpr(Expr::value(Value::SingleQuotedString("it's".to_string()))),
+            SelectItem::UnnamedExpr(Expr::value(Value::SingleQuotedString("a\tb".to_string()))),
+        ]
+    );
+}

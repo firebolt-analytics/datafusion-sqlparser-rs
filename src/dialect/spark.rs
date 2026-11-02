@@ -106,6 +106,11 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
+    /// See <https://spark.apache.org/docs/latest/sql-ref-functions-builtin.html#collection-functions>
+    fn supports_exists_function(&self) -> bool {
+        true
+    }
+
     /// See <https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select.html>
     fn supports_select_wildcard_except(&self) -> bool {
         true
@@ -191,19 +196,33 @@ impl Dialect for SparkSqlDialect {
         expr: &Expr,
         precedence: u8,
     ) -> Option<Result<Expr, ParserError>> {
-        if parser.parse_keyword(Keyword::DIV) {
-            let left = Box::new(expr.clone());
-            let right = Box::new(match parser.parse_subexpr(precedence) {
-                Ok(expr) => expr,
-                Err(e) => return Some(Err(e)),
-            });
-            Some(Ok(Expr::BinaryOp {
-                left,
-                op: BinaryOperator::MyIntegerDivide,
-                right,
-            }))
-        } else {
-            None
-        }
+        parse_div_infix(parser, expr, precedence)
     }
+
+    /// `'it\'s'` and `'a\tb'`: Spark reads backslash escapes in string literals.
+    ///
+    /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#string-literal>
+    fn supports_string_literal_backslash_escape(&self) -> bool {
+        true
+    }
+}
+
+/// `a DIV b`, Spark's integer division, shared with [`DatabricksDialect`](crate::dialect::DatabricksDialect).
+pub(crate) fn parse_div_infix(
+    parser: &mut Parser,
+    expr: &Expr,
+    precedence: u8,
+) -> Option<Result<Expr, ParserError>> {
+    if !parser.parse_keyword(Keyword::DIV) {
+        return None;
+    }
+    let right = match parser.parse_subexpr(precedence) {
+        Ok(expr) => expr,
+        Err(e) => return Some(Err(e)),
+    };
+    Some(Ok(Expr::BinaryOp {
+        left: Box::new(expr.clone()),
+        op: BinaryOperator::MyIntegerDivide,
+        right: Box::new(right),
+    }))
 }
