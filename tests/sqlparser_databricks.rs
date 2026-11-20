@@ -862,3 +862,29 @@ fn test_interval_preserves_column_query() {
         )))]
     );
 }
+
+#[test]
+fn test_databricks_div() {
+    databricks().one_statement_parses_to("SELECT 7 div 2", "SELECT 7 DIV 2");
+    assert_eq!(
+        databricks().verified_expr("7 DIV 2 + 1"),
+        Expr::BinaryOp {
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::value(number("7"))),
+                op: BinaryOperator::MyIntegerDivide,
+                right: Box::new(Expr::value(number("2"))),
+            }),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expr::value(number("1"))),
+        }
+    );
+}
+
+#[test]
+fn test_databricks_create_table_using_and_long() {
+    databricks().verified_stmt("CREATE TABLE t (i INT) USING DELTA");
+    databricks().one_statement_parses_to(
+        "CREATE TABLE t (id LONG) USING parquet",
+        "CREATE TABLE t (id BIGINT) USING parquet",
+    );
+}
