@@ -9402,7 +9402,6 @@ fn parse_exists_function() {
         "EXISTS (SELECT 1)",
         "EXISTS (WITH t AS (SELECT 1) SELECT * FROM t)",
         "EXISTS (VALUES (1))",
-        "EXISTS (TABLE t)",
         "EXISTS ((SELECT 1))",
         "EXISTS ((SELECT 1) UNION (SELECT 2))",
     ] {
@@ -9411,6 +9410,11 @@ fn parse_exists_function() {
             "{sql}"
         );
     }
+    // Every dialect with the exists function reads `TABLE t` as `SELECT * FROM t`.
+    assert!(matches!(
+        dialects.expr_parses_to("EXISTS (TABLE t)", "EXISTS (SELECT * FROM t)"),
+        Expr::Exists { .. }
+    ));
     assert!(matches!(
         dialects.verified_expr("NOT EXISTS (SELECT 1)"),
         Expr::Exists { negated: true, .. }
