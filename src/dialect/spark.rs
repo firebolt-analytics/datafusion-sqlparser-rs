@@ -15,10 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-
-use crate::ast::{BinaryOperator, Expr};
 use crate::dialect::{Dialect, Precedence};
 use crate::keywords::{self, Keyword};
 use crate::parser::{Parser, ParserError};
@@ -185,44 +181,10 @@ impl Dialect for SparkSqlDialect {
         true
     }
 
-    /// Parse the `DIV` keyword as integer division.
-    ///
-    /// Example: `SELECT 10 DIV 3` returns `3`.
-    ///
-    /// See <https://spark.apache.org/docs/latest/sql-ref-functions-builtin-math.html>
-    fn parse_infix(
-        &self,
-        parser: &mut Parser,
-        expr: &Expr,
-        precedence: u8,
-    ) -> Option<Result<Expr, ParserError>> {
-        parse_div_infix(parser, expr, precedence)
-    }
-
     /// `'it\'s'` and `'a\tb'`: Spark reads backslash escapes in string literals.
     ///
     /// See <https://spark.apache.org/docs/latest/sql-ref-literals.html#string-literal>
     fn supports_string_literal_backslash_escape(&self) -> bool {
         true
     }
-}
-
-/// `a DIV b`, Spark's integer division, shared with [`DatabricksDialect`](crate::dialect::DatabricksDialect).
-pub(crate) fn parse_div_infix(
-    parser: &mut Parser,
-    expr: &Expr,
-    precedence: u8,
-) -> Option<Result<Expr, ParserError>> {
-    if !parser.parse_keyword(Keyword::DIV) {
-        return None;
-    }
-    let right = match parser.parse_subexpr(precedence) {
-        Ok(expr) => expr,
-        Err(e) => return Some(Err(e)),
-    };
-    Some(Ok(Expr::BinaryOp {
-        left: Box::new(expr.clone()),
-        op: BinaryOperator::MyIntegerDivide,
-        right: Box::new(right),
-    }))
 }

@@ -15,8 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::ast::Expr;
-use crate::dialect::spark::parse_div_infix;
 use crate::dialect::{Dialect, Precedence};
 use crate::keywords::{self, Keyword};
 use crate::parser::{Parser, ParserError};
@@ -200,16 +198,6 @@ impl Dialect for DatabricksDialect {
 
     fn supports_pipe_operator(&self) -> bool {
         true
-    }
-
-    /// See <https://docs.databricks.com/aws/en/sql/language-manual/functions/div>
-    fn parse_infix(
-        &self,
-        parser: &mut Parser,
-        expr: &Expr,
-        precedence: u8,
-    ) -> Option<Result<Expr, ParserError>> {
-        parse_div_infix(parser, expr, precedence)
     }
 
     /// See <https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-create-table-using>
