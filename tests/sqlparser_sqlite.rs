@@ -1702,6 +1702,19 @@ fn parse_on_conflict_target_predicate() {
         other => panic!("unexpected statement: {other:?}"),
     }
 }
+
+#[test]
+fn parse_long_regexp_match_glob_chain() {
+    // Each operator must take its left operand rather than copy it: a copy
+    // makes a chain of n operators take time quadratic in n.
+    for operator in ["REGEXP", "MATCH", "GLOB"] {
+        let sql = format!("SELECT a{}", format!(" {operator} b").repeat(5000));
+        sqlite().parse_sql_statements(&sql).unwrap();
+        // The right operand is an ordinary expression, not ANY/ALL.
+        sqlite().verified_expr(&format!("a {operator} ANY(b)"));
+    }
+}
+
 fn sqlite() -> TestedDialects {
     TestedDialects::new(vec![Box::new(SQLiteDialect {})])
 }
