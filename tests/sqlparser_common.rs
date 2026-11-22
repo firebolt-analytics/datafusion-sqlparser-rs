@@ -6085,9 +6085,9 @@ fn parse_window_functions() {
         expr_from_projection(&select.projection[0])
     );
 
-    for i in 0..EXPECTED_PROJ_QTY {
+    for item in select.projection.iter().take(EXPECTED_PROJ_QTY) {
         assert!(matches!(
-            expr_from_projection(&select.projection[i]),
+            expr_from_projection(item),
             Expr::Function(Function {
                 over: Some(WindowType::WindowSpec(WindowSpec {
                     window_name: None,

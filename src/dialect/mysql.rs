@@ -15,11 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-
 use crate::{
-    ast::{BinaryOperator, Expr, LockTable, LockTableType, Statement},
+    ast::{LockTable, LockTableType, Statement},
     dialect::Dialect,
     keywords::Keyword,
     parser::{Parser, ParserError},
@@ -92,29 +89,6 @@ impl Dialect for MySqlDialect {
     /// see <https://dev.mysql.com/doc/refman/8.4/en/comments.html>
     fn supports_multiline_comment_hints(&self) -> bool {
         true
-    }
-
-    fn parse_infix(
-        &self,
-        parser: &mut crate::parser::Parser,
-        expr: &crate::ast::Expr,
-        precedence: u8,
-    ) -> Option<Result<crate::ast::Expr, ParserError>> {
-        // Parse DIV as an operator
-        if parser.parse_keyword(Keyword::DIV) {
-            let left = Box::new(expr.clone());
-            let right = Box::new(match parser.parse_subexpr(precedence) {
-                Ok(expr) => expr,
-                Err(e) => return Some(Err(e)),
-            });
-            Some(Ok(Expr::BinaryOp {
-                left,
-                op: BinaryOperator::MyIntegerDivide,
-                right,
-            }))
-        } else {
-            None
-        }
     }
 
     fn parse_statement(&self, parser: &mut Parser) -> Option<Result<Statement, ParserError>> {
