@@ -16891,6 +16891,7 @@ impl<'a> Parser<'a> {
                     && !natural
                     && self.peek_parens_less_nested_join()
                 {
+                    let _guard = self.recursion_counter.try_decrease()?;
                     let joins = self.parse_joins()?;
                     relation = TableFactor::NestedJoin {
                         table_with_joins: Box::new(TableWithJoins { relation, joins }),
