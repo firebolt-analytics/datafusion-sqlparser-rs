@@ -12601,6 +12601,21 @@ fn parse_deeply_nested_unary_op_hits_recursion_limits() {
 }
 
 #[test]
+fn parse_deeply_nested_joins_hits_recursion_limits() {
+    let dialect = PostgreSqlDialect {};
+    let sql = format!(
+        "SELECT 1 FROM t{}",
+        " JOIN t".repeat(30) + &" ON true".repeat(30)
+    );
+    let res = Parser::new(&dialect)
+        .with_recursion_limit(20)
+        .try_with_sql(&sql)
+        .expect("tokenize to work")
+        .parse_statements();
+    assert_eq!(res, Err(ParserError::RecursionLimitExceeded));
+}
+
+#[test]
 fn parse_deeply_nested_expr_hits_recursion_limits() {
     let dialect = GenericDialect {};
 
